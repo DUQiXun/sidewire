@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "crosswire": {
+      "command": "C:\\Users\\you\\AppData\\Local\\crosswire\\..\\python.exe",
+      "args": [
+        "C:\\Users\\you\\AppData\\Local\\crosswire\\cw.py",
+        "serve"
+      ],
+      "env": {
+        "CROSSWIRE_HOME": "C:\\Users\\you\\.crosswire"
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+*.log
+*.cw-part
+*.cw-bak
+.crosswire/
+hosts.json
+agent.key
+key
+.DS_Store
+Thumbs.db

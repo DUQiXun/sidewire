@@ -1,0 +1,24 @@
+# DeepSeek Harness: ~/.dsh/profiles/<name>/cordis.patch.yml
+#
+# This is exactly what `python cw.py dsh-install` appends. If you edit it by
+# hand, keep the `- insert:` list shape — dsh merges these as loader patches,
+# and a stray top-level key will make the composer complain.
+#
+# toolCallTimeoutMs is generous on purpose: `pkg install` and long builds are
+# legitimately slow, and a timeout here looks like a broken server to the model.
+
+- insert:
+    - id: mcp-crosswire
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: crosswire
+        transport: stdio
+        command: 'C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe'
+        args:
+          - 'C:\Users\you\AppData\Local\crosswire\cw.py'
+          - 'serve'
+        cwd: 'C:\Users\you\AppData\Local\crosswire'
+        env:
+          CROSSWIRE_HOME: 'C:\Users\you\.crosswire'
+        toolCallTimeoutMs: 600000
+        failOnStartupError: false
