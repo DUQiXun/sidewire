@@ -33,10 +33,28 @@ class Ctx(object):
         self.downloads = cfg.get("downloads")
 
     def conn(self, alias=None):
+        # Re-read hosts.json on every call. A target's address is not stable:
+        # DHCP moves it, or the machine gets put inline as a bridge and ends up
+        # on a different subnet. Caching the file at startup means every tool
+        # call keeps dialling an address that stopped answering, and the only
+        # cure is restarting the MCP server. Reloading a small JSON is cheaper.
+        try:
+            self.cfg = cfgmod.load()
+        except Exception as exc:
+            self.log("config reload failed, keeping cached copy: %s" % exc)
         cfg = self.cfg
         name, entry = cfgmod.resolve_host(cfg, alias)
         key_text = cfgmod.host_key(entry, cfg)
+        wanted = (entry.get("host"), int(entry.get("port") or cfgmod.DEFAULT_PORT))
         existing = self._conns.get(name)
+        if existing and (existing.host, existing.port) != wanted:
+            self.log("address for %s changed to %s:%s, reconnecting" %
+                     ((name,) + wanted))
+            try:
+                existing.close()
+            except Exception:
+                pass
+            existing = None
         if existing and existing.alive:
             return existing
         if existing:

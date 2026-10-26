@@ -154,8 +154,14 @@ def cmd_info(args):
 
 def cmd_sh(args):
     cfg = cfgmod.load()
+    parts = args.command if isinstance(args.command, list) else [args.command]
+    if parts and parts[0] == "--":
+        parts = parts[1:]
+    cmd = " ".join(parts).strip()
+    if not cmd:
+        sys.stderr.write("crosswire: no command given\n")
+        return 2
     remote = open_remote(cfg, args.alias)
-    cmd = args.command if isinstance(args.command, str) else " ".join(args.command)
     res = remote.request("exec.run", {"command": cmd, "timeout": args.timeout}, timeout=args.timeout + 10)
     sys.stdout.write(res.get("stdout") or "")
     sys.stderr.write(res.get("stderr") or "")
@@ -476,9 +482,11 @@ def build_parser():
     p.set_defaults(func=cmd_info)
 
     p = sub.add_parser("sh", help="run one command on the target")
-    p.add_argument("command", help="quote the whole command line: sh \"df -h && free -m\"")
     p.add_argument("--host", dest="alias", default=None)
     p.add_argument("--timeout", type=float, default=60)
+    p.add_argument("command", nargs=argparse.REMAINDER,
+                   help="command to run; quote it if it has shell operators: "
+                        "sh \"df -h && free -m\"  |  or pass it raw: sh uname -a")
     p.set_defaults(func=cmd_sh)
 
     p = sub.add_parser("push", help="upload a file")
