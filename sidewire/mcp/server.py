@@ -21,7 +21,7 @@ LATEST = SUPPORTED_VERSIONS[0]
 
 
 class StdioServer(object):
-    def __init__(self, ctx, name="crosswire"):
+    def __init__(self, ctx, name="sidewire"):
         self.ctx = ctx
         self.name = name
         self._out = sys.stdout.buffer
@@ -31,7 +31,7 @@ class StdioServer(object):
     # ------------------------------------------------------------------ io
     def log(self, msg):
         try:
-            sys.stderr.write("[crosswire] %s\n" % msg)
+            sys.stderr.write("[sidewire] %s\n" % msg)
             sys.stderr.flush()
         except Exception:
             pass
@@ -102,7 +102,7 @@ class StdioServer(object):
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": self.name, "version": __version__},
                 "instructions": (
-                    "CrossWire gives you shell, file, process and network control over remote "
+                    "SideWire gives you shell, file, process and network control over remote "
                     "machines on the LAN. Call `hosts` to see targets, `host_info` to identify "
                     "the one you are about to touch, then `run` / `fs_*`. Paths are always paths "
                     "on the target, not on this machine."

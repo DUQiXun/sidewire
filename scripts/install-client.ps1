@@ -1,13 +1,13 @@
-# CrossWire client installer for the machine that runs the agent (Windows).
+# SideWire client installer for the machine that runs the agent (Windows).
 #
 #   powershell -ExecutionPolicy Bypass -File install-client.ps1
-#   powershell -ExecutionPolicy Bypass -File install-client.ps1 -InstallDir D:\tools\crosswire
+#   powershell -ExecutionPolicy Bypass -File install-client.ps1 -InstallDir D:\tools\sidewire
 #
 # Copies the client somewhere stable, wires it into DeepSeek Harness, and
 # prints the config block for anything else.
 
 param(
-    [string]$InstallDir = "$env:LOCALAPPDATA\crosswire",
+    [string]$InstallDir = "$env:LOCALAPPDATA\sidewire",
     [string]$Python = "",
     [switch]$NoDsh
 )
@@ -37,11 +37,11 @@ $py = Find-Python -Hint $Python
 Write-Host "python     : $py"
 $ver = & $py -c "import sys; print('%d.%d' % sys.version_info[:2])"
 Write-Host "version    : $ver"
-if ([version]$ver -lt [version]"3.9") { throw "CrossWire needs Python 3.9 or newer, found $ver" }
+if ([version]$ver -lt [version]"3.9") { throw "SideWire needs Python 3.9 or newer, found $ver" }
 
 Write-Host "installing : $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-foreach ($item in @("crosswire", "agent", "cw.py", "docs", "examples")) {
+foreach ($item in @("sidewire", "agent", "sw.py", "docs", "examples")) {
     $src = Join-Path $here $item
     if (Test-Path $src) {
         Copy-Item -Recurse -Force $src (Join-Path $InstallDir $item)
@@ -49,10 +49,10 @@ foreach ($item in @("crosswire", "agent", "cw.py", "docs", "examples")) {
 }
 
 # drop stale bytecode from a previous version
-Get-ChildItem -Recurse -Path (Join-Path $InstallDir "crosswire") -Filter "__pycache__" -ErrorAction SilentlyContinue |
+Get-ChildItem -Recurse -Path (Join-Path $InstallDir "sidewire") -Filter "__pycache__" -ErrorAction SilentlyContinue |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
-$launcher = Join-Path $InstallDir "cw.py"
+$launcher = Join-Path $InstallDir "sw.py"
 Write-Host "launcher   : $launcher"
 
 & $py $launcher init

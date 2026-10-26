@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-crosswire_agentd — CrossWire agent daemon (runs on the machine you want to control)
+sidewire_agentd — SideWire agent daemon (runs on the machine you want to control)
 
 Single file, Python 3.8+, standard library only.  Copy it to the target box,
 generate a key, start it, done.  No pip install, no Node, no SSH daemon.
 
     # on the target
-    python3 crosswire_agentd.py --keygen --key-file /etc/crosswire/agent.key
-    python3 crosswire_agentd.py --key-file /etc/crosswire/agent.key --port 7900
+    python3 sidewire_agentd.py --keygen --key-file /etc/sidewire/agent.key
+    python3 sidewire_agentd.py --key-file /etc/sidewire/agent.key --port 7900
 
-It speaks the CrossWire binary protocol (see docs/PROTOCOL.md): 16-byte frame
+It speaks the SideWire binary protocol (see docs/PROTOCOL.md): 16-byte frame
 headers, multiplexed streams, one TCP connection, no server-side session state.
 System facts are read straight out of /proc and /sys instead of shelling out to
 ps/ss/netstat, so a bare container with no procps still works.
@@ -37,7 +37,7 @@ import traceback
 import zlib
 
 # ===========================================================================
-# 1. protocol (byte-compatible with crosswire/protocol.py — verified by tests)
+# 1. protocol (byte-compatible with sidewire/protocol.py — verified by tests)
 # ===========================================================================
 
 MAGIC = b"CWP1"
@@ -183,11 +183,19 @@ def session_key(key, nc, ns):
 
 
 def parse_key(text):
+    """Accept bare hex or a short-prefixed hex key.
+
+    Any prefix is tolerated, not just `sw1_`. Older installs carry a key
+    labelled with the project's previous name and there is no reason to make
+    them regenerate it. Must stay identical to the client's version; the
+    byte-for-byte test in tests/test_protocol.py enforces that.
+    """
     if isinstance(text, bytes):
         text = text.decode("ascii", "ignore")
     text = (text or "").strip()
-    if text.startswith("cw1_"):
-        text = text[4:]
+    head, sep, tail = text.partition("_")
+    if sep and len(head) <= 8 and tail and all(c in "0123456789abcdefABCDEF" for c in tail):
+        text = tail
     text = text.replace("-", "").replace(" ", "")
     try:
         raw = bytes.fromhex(text)
@@ -1457,7 +1465,7 @@ def h_fs_edit(conn, p):
         return {"path": path, "replaced": n, "dry_run": True}
     if n:
         if p.get("backup"):
-            shutil.copy2(path, path + ".cw-bak")
+            shutil.copy2(path, path + ".sw-bak")
         with open(path, "w", encoding=p.get("encoding") or "utf-8") as fh:
             fh.write(new_text)
     return {"path": path, "replaced": n, "size": os.path.getsize(path)}
@@ -1639,7 +1647,7 @@ class Incoming(object):
     def __init__(self, sid, path, size, sha256):
         self.sid = sid
         self.path = path
-        self.tmp = path + ".cw-part"
+        self.tmp = path + ".sw-part"
         self.size = size
         self.sha256 = sha256
         self.received = 0
@@ -2236,8 +2244,8 @@ def serve_forever(bind, port, key, opts):
 def main(argv=None):
     global WORKDIR, SUDO_PASSWORD, POLICY, CONFIG
     ap = argparse.ArgumentParser(
-        prog="crosswire_agentd",
-        description="CrossWire agent daemon — lets a Windows-side AI agent drive this machine.")
+        prog="sidewire_agentd",
+        description="SideWire agent daemon — lets a Windows-side AI agent drive this machine.")
     ap.add_argument("--bind", default=None, help="listen address (default 0.0.0.0)")
     ap.add_argument("--port", type=int, default=None, help="listen port (default 7900)")
     ap.add_argument("--key", default=None, help="shared key (hex), prefer --key-file")
@@ -2263,7 +2271,7 @@ def main(argv=None):
 
     if args.keygen:
         raw = os.urandom(32)
-        key_text = "cw1_" + raw.hex()
+        key_text = "sw1_" + raw.hex()
         if args.out:
             with open(args.out, "w", encoding="utf-8") as fh:
                 fh.write(key_text + "\n")
@@ -2293,14 +2301,14 @@ def main(argv=None):
     WORKDIR = os.path.expanduser(args.workdir or cfg.get("workdir") or "~")
     SUDO_PASSWORD = args.sudo_password or cfg.get("sudo_password")
 
-    key_text = args.key or os.environ.get("CROSSWIRE_KEY")
+    key_text = args.key or os.environ.get("SIDEWIRE_KEY")
     key_file = args.key_file or cfg.get("key_file")
     if not key_text and key_file and os.path.exists(key_file):
         with open(key_file, "r", encoding="utf-8") as fh:
             key_text = fh.read().strip()
     if not key_text:
-        log("no key configured — run with --keygen --out /etc/crosswire/agent.key "
-            "then --key-file /etc/crosswire/agent.key", "error")
+        log("no key configured — run with --keygen --out /etc/sidewire/agent.key "
+            "then --key-file /etc/sidewire/agent.key", "error")
         return 2
     key = parse_key(key_text)
 
@@ -2318,7 +2326,7 @@ def main(argv=None):
         "crypto": not args.no_crypto and cfg.get("crypto", True),
         "allow_cidrs": args.allow_cidr or cfg.get("allow_cidrs") or [],
     }
-    log("crosswire agentd %s starting (pid %d, python %s)" %
+    log("sidewire agentd %s starting (pid %d, python %s)" %
         (CONFIG["version"], os.getpid(), sys.version.split()[0]))
     serve_forever(bind, port, key, opts)
     return 0
@@ -2327,13 +2335,13 @@ def main(argv=None):
 def _systemd_unit(args):
     exe = os.path.abspath(__file__)
     return """[Unit]
-Description=CrossWire agent daemon
+Description=SideWire agent daemon
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%s %s --key-file /etc/crosswire/agent.key --port %d
+ExecStart=%s %s --key-file /etc/sidewire/agent.key --port %d
 Restart=always
 RestartSec=2
 LimitNOFILE=65536

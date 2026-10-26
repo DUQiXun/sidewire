@@ -21,9 +21,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from crosswire import config as cfgmod          # noqa: E402
-from crosswire import protocol as P             # noqa: E402
-from crosswire.client import Remote, RemoteError, open_remote  # noqa: E402
+from sidewire import config as cfgmod          # noqa: E402
+from sidewire import protocol as P             # noqa: E402
+from sidewire.client import Remote, RemoteError, open_remote  # noqa: E402
 
 IS_WIN = os.name == "nt"
 RESULTS = []
@@ -71,13 +71,13 @@ def wait_port(port, timeout=10):
 
 def main():
     tmp = tempfile.mkdtemp(prefix="cw-e2e-")
-    os.environ["CROSSWIRE_HOME"] = tmp
+    os.environ["SIDEWIRE_HOME"] = tmp
     port = free_port()
     key = P.format_key(P.gen_key(32))
     key_file = os.path.join(tmp, "agent.key")
     cfgmod.write_key_file(key_file, key)
 
-    agent = os.path.join(ROOT, "agent", "crosswire_agentd.py")
+    agent = os.path.join(ROOT, "agent", "sidewire_agentd.py")
     workdir = os.path.join(tmp, "work")
     os.makedirs(workdir, exist_ok=True)
     log = open(os.path.join(tmp, "agentd.log"), "w", encoding="utf-8")
@@ -124,9 +124,9 @@ def main():
 
         # --------------------------------------------------------------- exec
         def t_echo():
-            r = remote.request("exec.run", {"command": "echo hello-crosswire"})
+            r = remote.request("exec.run", {"command": "echo hello-sidewire"})
             eq(r["exit"], 0, "exit")
-            truthy("hello-crosswire" in r["stdout"], "stdout")
+            truthy("hello-sidewire" in r["stdout"], "stdout")
         check("exec.run echo", t_echo)
 
         def t_exit_code():

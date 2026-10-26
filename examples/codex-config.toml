@@ -3,11 +3,11 @@
 # Point `command` at the python.exe you actually use. On Windows, paths with
 # backslashes need to be either single-quoted or doubled.
 
-[mcp_servers.crosswire]
+[mcp_servers.sidewire]
 command = 'C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe'
-args = ['C:\Users\you\AppData\Local\crosswire\cw.py', 'serve']
+args = ['C:\Users\you\AppData\Local\sidewire\sw.py', 'serve']
 startup_timeout_sec = 30
 tool_timeout_sec = 600
 
-[mcp_servers.crosswire.env]
-CROSSWIRE_HOME = 'C:\Users\you\.crosswire'
+[mcp_servers.sidewire.env]
+SIDEWIRE_HOME = 'C:\Users\you\.sidewire'

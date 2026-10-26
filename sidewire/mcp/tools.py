@@ -323,7 +323,7 @@ TOOLS = [
             "regex": {"type": "boolean"},
             "count": {"type": "integer", "description": "Max replacements (default all)"},
             "ignore_case": {"type": "boolean"},
-            "backup": {"type": "boolean", "description": "Keep a .cw-bak copy"},
+            "backup": {"type": "boolean", "description": "Keep a .sw-bak copy"},
             "dry_run": {"type": "boolean"},
             "allow_missing": {"type": "boolean", "description": "Do not error when old is absent"},
         }), ["path", "old", "new"]),

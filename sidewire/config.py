@@ -1,6 +1,6 @@
-"""Config + host registry for the CrossWire client.
+"""Config + host registry for the SideWire client.
 
-Everything lives under ``$CROSSWIRE_HOME`` (default ``~/.crosswire``):
+Everything lives under ``$SIDEWIRE_HOME`` (default ``~/.sidewire``):
 
     hosts.json      host registry + defaults
     key             optional shared default key (0600)
@@ -9,10 +9,10 @@ Everything lives under ``$CROSSWIRE_HOME`` (default ``~/.crosswire``):
 
 Environment overrides:
 
-    CROSSWIRE_HOME     config directory
-    CROSSWIRE_HOST     default host alias
-    CROSSWIRE_KEY      key for the default host (wins over hosts.json)
-    CROSSWIRE_PORT     default port
+    SIDEWIRE_HOME     config directory
+    SIDEWIRE_HOST     default host alias
+    SIDEWIRE_KEY      key for the default host (wins over hosts.json)
+    SIDEWIRE_PORT     default port
 """
 
 from __future__ import annotations
@@ -39,10 +39,10 @@ _SCHEMA = {
 
 
 def home():
-    override = os.environ.get("CROSSWIRE_HOME")
+    override = os.environ.get("SIDEWIRE_HOME")
     if override:
         return os.path.abspath(os.path.expanduser(override))
-    return os.path.join(os.path.expanduser("~"), ".crosswire")
+    return os.path.join(os.path.expanduser("~"), ".sidewire")
 
 
 def config_path():
@@ -131,7 +131,7 @@ class HostNotFound(Exception):
 
 def resolve_host(cfg, alias=None):
     """Return (alias, host_dict) for *alias* (or the configured default)."""
-    alias = alias or os.environ.get("CROSSWIRE_HOST") or cfg.get("default")
+    alias = alias or os.environ.get("SIDEWIRE_HOST") or cfg.get("default")
     hosts = cfg.get("hosts") or {}
     if not alias:
         if len(hosts) == 1:
@@ -139,12 +139,12 @@ def resolve_host(cfg, alias=None):
         else:
             raise HostNotFound(
                 "no host selected and no default configured; "
-                "run `crosswire add <alias> <ip>` first")
+                "run `sidewire add <alias> <ip>` first")
     if alias not in hosts:
         raise HostNotFound("unknown host %r; known: %s" %
                            (alias, ", ".join(sorted(hosts)) or "(none)"))
     entry = dict(hosts[alias])
-    entry.setdefault("port", int(os.environ.get("CROSSWIRE_PORT") or DEFAULT_PORT))
+    entry.setdefault("port", int(os.environ.get("SIDEWIRE_PORT") or DEFAULT_PORT))
     entry["alias"] = alias
     return alias, entry
 
@@ -154,7 +154,7 @@ def host_key(entry, cfg):
     key = entry.get("key")
     if key:
         return key
-    env = os.environ.get("CROSSWIRE_KEY")
+    env = os.environ.get("SIDEWIRE_KEY")
     if env:
         return env
     for candidate in (entry.get("key_file"), default_key_file()):
@@ -164,7 +164,7 @@ def host_key(entry, cfg):
                 return found
     raise RuntimeError(
         "no key for host %r — set \"key\" or \"key_file\" in %s, "
-        "or export CROSSWIRE_KEY" % (entry.get("alias"), config_path()))
+        "or export SIDEWIRE_KEY" % (entry.get("alias"), config_path()))
 
 
 def add_host(alias, host, port=DEFAULT_PORT, key=None, user=None, note=None,

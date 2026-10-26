@@ -1,13 +1,13 @@
 {
   "mcpServers": {
-    "crosswire": {
-      "command": "C:\\Users\\you\\AppData\\Local\\crosswire\\..\\python.exe",
+    "sidewire": {
+      "command": "C:\\Users\\you\\AppData\\Local\\sidewire\\..\\python.exe",
       "args": [
-        "C:\\Users\\you\\AppData\\Local\\crosswire\\cw.py",
+        "C:\\Users\\you\\AppData\\Local\\sidewire\\sw.py",
         "serve"
       ],
       "env": {
-        "CROSSWIRE_HOME": "C:\\Users\\you\\.crosswire"
+        "SIDEWIRE_HOME": "C:\\Users\\you\\.sidewire"
       }
     }
   }

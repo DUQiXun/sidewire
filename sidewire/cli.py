@@ -1,4 +1,4 @@
-"""Command line entry point: `crosswire <command>`."""
+"""Command line entry point: `sidewire <command>`."""
 
 from __future__ import annotations
 
@@ -64,15 +64,15 @@ def cmd_init(args):
     print("key        : %s" % key)
     print()
     print(bold("Next:"))
-    print("  1. copy agent/crosswire_agentd.py to the Linux box and run:")
-    print("       sudo mkdir -p /etc/crosswire")
-    print("       sudo python3 crosswire_agentd.py --keygen --out /etc/crosswire/agent.key")
+    print("  1. copy agent/sidewire_agentd.py to the Linux box and run:")
+    print("       sudo mkdir -p /etc/sidewire")
+    print("       sudo python3 sidewire_agentd.py --keygen --out /etc/sidewire/agent.key")
     print("     then start it with that key (see docs/DEPLOY.md).")
     print("  2. register the machine here:")
-    print("       crosswire add sub 192.168.1.50 --key %s" % key[:14] + "...")
+    print("       sidewire add sub 192.168.1.50 --key %s" % key[:14] + "...")
     print("  3. wire it into your agent:")
-    print("       crosswire dsh-install        # DeepSeek Harness")
-    print("       crosswire mcp-config         # everything else")
+    print("       sidewire dsh-install        # DeepSeek Harness")
+    print("       sidewire mcp-config         # everything else")
     return 0
 
 
@@ -103,7 +103,7 @@ def cmd_list(args):
     cfg = cfgmod.load()
     hosts = cfg.get("hosts") or {}
     if not hosts:
-        print("no hosts yet — `crosswire add sub 192.168.1.50 --key <key>`")
+        print("no hosts yet — `sidewire add sub 192.168.1.50 --key <key>`")
         return 1
     print("%-10s %-22s %-6s %-8s %s" % ("ALIAS", "ADDRESS", "PORT", "STATUS", "NOTE"))
     for alias, entry in sorted(hosts.items()):
@@ -159,7 +159,7 @@ def cmd_sh(args):
         parts = parts[1:]
     cmd = " ".join(parts).strip()
     if not cmd:
-        sys.stderr.write("crosswire: no command given\n")
+        sys.stderr.write("sidewire: no command given\n")
         return 2
     remote = open_remote(cfg, args.alias)
     res = remote.request("exec.run", {"command": cmd, "timeout": args.timeout}, timeout=args.timeout + 10)
@@ -229,14 +229,14 @@ def cmd_keygen(args):
         print("wrote %s" % args.out)
     print(text)
     if not args.quiet:
-        eprint(dim("\nOn the target:  crosswire_agentd.py --keygen --out /etc/crosswire/agent.key"))
+        eprint(dim("\nOn the target:  sidewire_agentd.py --keygen --out /etc/sidewire/agent.key"))
     return 0
 
 
 def cmd_serve(args):
     from .mcp.server import StdioServer
     cfg = cfgmod.load()
-    ctx = toolmod.Ctx(cfg, logger=lambda m: eprint("[crosswire] %s" % m))
+    ctx = toolmod.Ctx(cfg, logger=lambda m: eprint("[sidewire] %s" % m))
     if args.list_tools:
         for t in toolmod.tool_list_payload():
             print("%-12s %s" % (t["name"], t["description"].split(".")[0]))
@@ -333,20 +333,20 @@ def cmd_bootstrap(args):
     port = args.port or cfgmod.DEFAULT_PORT
     script = """
 # --- on the target machine (Linux) -----------------------------------------
-sudo mkdir -p /etc/crosswire /opt/crosswire
-sudo cp crosswire_agentd.py /opt/crosswire/
-echo '%s' | sudo tee /etc/crosswire/agent.key >/dev/null
-sudo chmod 600 /etc/crosswire/agent.key
+sudo mkdir -p /etc/sidewire /opt/sidewire
+sudo cp sidewire_agentd.py /opt/sidewire/
+echo '%s' | sudo tee /etc/sidewire/agent.key >/dev/null
+sudo chmod 600 /etc/sidewire/agent.key
 
 # run in the foreground first to see it work
-sudo python3 /opt/crosswire/crosswire_agentd.py \\
-     --key-file /etc/crosswire/agent.key --port %d --allow-sudo --allow-pkg
+sudo python3 /opt/sidewire/sidewire_agentd.py \\
+     --key-file /etc/sidewire/agent.key --port %d --allow-sudo --allow-pkg
 
 # then install it as a service
-sudo python3 /opt/crosswire/crosswire_agentd.py --print-unit \\
-     | sudo tee /etc/systemd/system/crosswire-agentd.service >/dev/null
+sudo python3 /opt/sidewire/sidewire_agentd.py --print-unit \\
+     | sudo tee /etc/systemd/system/sidewire-agentd.service >/dev/null
 sudo systemctl daemon-reload
-sudo systemctl enable --now crosswire-agentd
+sudo systemctl enable --now sidewire-agentd
 sudo ufw allow %d/tcp        # or firewall-cmd --add-port=%d/tcp
 """ % (key, port, port, port)
     print(script.strip())
@@ -358,79 +358,125 @@ def cmd_mcp_config(args):
     py = sys.executable
     entry = {
         "command": py,
-        "args": [os.path.join(here, "cw.py"), "serve"],
-        "env": {"CROSSWIRE_HOME": cfgmod.home()},
+        "args": [os.path.join(here, "sw.py"), "serve"],
+        "env": {"SIDEWIRE_HOME": cfgmod.home()},
     }
     if args.client == "claude":
-        payload = {"mcpServers": {"crosswire": entry}}
+        payload = {"mcpServers": {"sidewire": entry}}
     elif args.client == "codex":
-        payload = {"mcp_servers": {"crosswire": dict(entry, startup_timeout_sec=30)}}
+        payload = {"mcp_servers": {"sidewire": dict(entry, startup_timeout_sec=30)}}
     else:
-        payload = {"mcpServers": {"crosswire": entry}}
+        payload = {"mcpServers": {"sidewire": entry}}
     print(json.dumps(payload, indent=2))
     return 0
 
 
+def _dsh_block(py, launcher, here, wrapped):
+    """Build the YAML entry.
+
+    `profiles/*/cordis.patch.yml` is a list of `- insert:` patches, while
+    `.agent-presets/*/agent.cordis.yml` is a plain list of plugins. Same
+    fields, different nesting, so the indent shifts by four spaces.
+    """
+    header = """# ── SideWire ────────────────────────────────────────────────────────────────
+# LAN control of another machine. Adds the mcp__sidewire__* tool family.
+# Server side is agent/sidewire_agentd.py; this side is `sw.py serve`.
+"""
+    pad = "    " if wrapped else ""
+    body = """{pad}- id: mcp-sidewire
+{pad}  name: '@deepseek-ai/dsh-mcp-client'
+{pad}  config:
+{pad}    serverName: sidewire
+{pad}    transport: stdio
+{pad}    command: '{py}'
+{pad}    args: ['{launcher}', 'serve']
+{pad}    cwd: '{here}'
+{pad}    env:
+{pad}      SIDEWIRE_HOME: '{home}'
+{pad}    toolCallTimeoutMs: 600000
+{pad}    failOnStartupError: false
+""".format(pad=pad, py=py, launcher=launcher, here=here, home=cfgmod.home())
+    if wrapped:
+        return header + "- insert:\n" + body
+    return header + body
+
+
+def _append_entry(path, block, label):
+    """Append `block`, making sure the file ends with a newline first.
+
+    These DSH files frequently have no trailing newline, and appending
+    straight onto them welds the first comment line onto the last entry.
+    """
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    if "mcp-sidewire" in text:
+        print(dim("  %-10s already registered" % label))
+        return False
+    lead = "" if text.endswith("\n") or not text else "\n"
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(lead + block)
+    print(ok("  %-10s registered" % label))
+    return True
+
+
 def cmd_dsh_install(args):
-    """Register this MCP server into DeepSeek Harness profiles."""
+    """Register this MCP server into DeepSeek Harness.
+
+    DSH keeps MCP config in two different places depending on how it is
+    started: the CLI reads `profiles/*/cordis.patch.yml`, the desktop app
+    reads `.agent-presets/*/agent.cordis.yml`. Nobody documents this. Write
+    to both, or the desktop app silently ignores you.
+    """
     home = os.path.expanduser("~/.dsh")
     profiles_dir = os.path.join(home, "profiles")
-    if not os.path.isdir(profiles_dir):
+    presets_dir = os.path.join(home, ".agent-presets")
+    if not os.path.isdir(profiles_dir) and not os.path.isdir(presets_dir):
         eprint(bad("no DeepSeek Harness at %s" % home))
         return 2
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    launcher = os.path.join(here, "cw.py")
+    launcher = os.path.join(here, "sw.py")
     py = args.python or sys.executable
     if os.name == "nt":
         # git-bash / msys happily rewrites C:\x into C://x when passing args
         py = py.replace("/", "\\")
         launcher = launcher.replace("/", "\\")
         here = here.replace("/", "\\")
-    targets = args.profile or [d for d in sorted(os.listdir(profiles_dir))
-                               if os.path.isdir(os.path.join(profiles_dir, d))]
-    block = """
-# ── CrossWire ────────────────────────────────────────────────────────────────
-# LAN control of another machine (Linux box as the "sub" host). Adds the
-# mcp__crosswire__* tool family. Server: crosswire/cw.py serve
-- insert:
-    - id: mcp-crosswire
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        serverName: crosswire
-        transport: stdio
-        command: '%s'
-        args:
-          - '%s'
-          - 'serve'
-        cwd: '%s'
-        env:
-          CROSSWIRE_HOME: '%s'
-        toolCallTimeoutMs: 600000
-        failOnStartupError: false
-""" % (py, launcher, here, cfgmod.home())
+
     changed = []
-    for name in targets:
-        path = os.path.join(profiles_dir, name, "cordis.patch.yml")
-        if not os.path.exists(path):
-            continue
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
-        if "mcp-crosswire" in text:
-            print(dim("  %-8s already registered" % name))
-            continue
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(block)
-        changed.append(name)
-        print(ok("  %-8s registered" % name))
-    if changed:
-        print("\nrestart dsh to pick it up: %s" % ", ".join(changed))
+
+    if os.path.isdir(profiles_dir):
+        names = args.profile or [d for d in sorted(os.listdir(profiles_dir))
+                                 if os.path.isdir(os.path.join(profiles_dir, d))]
+        block = _dsh_block(py, launcher, here, wrapped=True)
+        print("profiles")
+        for name in names:
+            path = os.path.join(profiles_dir, name, "cordis.patch.yml")
+            if os.path.exists(path) and _append_entry(path, block, name):
+                changed.append(name)
+
+    if os.path.isdir(presets_dir) and not args.no_preset:
+        names = args.preset or [d for d in sorted(os.listdir(presets_dir))
+                                if os.path.isfile(os.path.join(presets_dir, d, "agent.cordis.yml"))]
+        block = _dsh_block(py, launcher, here, wrapped=False)
+        print("agent presets")
+        for name in names:
+            path = os.path.join(presets_dir, name, "agent.cordis.yml")
+            if os.path.exists(path) and _append_entry(path, block, name):
+                changed.append("preset:" + name)
+
+    if not changed:
+        print(dim("nothing to do"))
+        return 0
+    print("\nrestart dsh to pick it up: %s" % ", ".join(changed))
+    if any(c.startswith("preset:") for c in changed):
+        print(dim("the desktop app only re-reads presets on start, so a full restart is required"))
     return 0
 
 
 def cmd_serve_agent(args):
     """Convenience: run the bundled agent daemon (handy for a self-test)."""
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    agent = os.path.join(here, "agent", "crosswire_agentd.py")
+    agent = os.path.join(here, "agent", "sidewire_agentd.py")
     argv = [sys.executable, agent] + args.agent_args
     return subprocess.call(argv)
 
@@ -439,12 +485,12 @@ def cmd_serve_agent(args):
 
 def build_parser():
     ap = argparse.ArgumentParser(
-        prog="crosswire",
-        description="CrossWire %s — control another machine on your LAN from an AI agent." % __version__)
-    ap.add_argument("-V", "--version", action="version", version="crosswire " + __version__)
+        prog="sidewire",
+        description="SideWire %s — control another machine on your LAN from an AI agent." % __version__)
+    ap.add_argument("-V", "--version", action="version", version="sidewire " + __version__)
     sub = ap.add_subparsers(dest="cmd")
 
-    p = sub.add_parser("init", help="create ~/.crosswire and a fresh key")
+    p = sub.add_parser("init", help="create ~/.sidewire and a fresh key")
     p.add_argument("--force", action="store_true", help="replace an existing key")
     p.set_defaults(func=cmd_init)
 
@@ -511,7 +557,7 @@ def build_parser():
     p.set_defaults(func=cmd_keygen)
 
     p = sub.add_parser("serve", help="run the MCP server on stdio (what the agent launches)")
-    p.add_argument("--name", default="crosswire")
+    p.add_argument("--name", default="sidewire")
     p.add_argument("--list-tools", action="store_true")
     p.set_defaults(func=cmd_serve)
 
@@ -530,8 +576,13 @@ def build_parser():
     p.add_argument("--client", choices=["claude", "codex", "generic"], default="generic")
     p.set_defaults(func=cmd_mcp_config)
 
-    p = sub.add_parser("dsh-install", help="register into DeepSeek Harness profiles")
-    p.add_argument("--profile", action="append", default=None)
+    p = sub.add_parser("dsh-install", help="register into DeepSeek Harness")
+    p.add_argument("--profile", action="append", default=None,
+                   help="only these profile names (default: all)")
+    p.add_argument("--preset", action="append", default=None,
+                   help="only these agent preset names (default: all)")
+    p.add_argument("--no-preset", action="store_true",
+                   help="skip agent presets, profiles only")
     p.add_argument("--python", default=None)
     p.set_defaults(func=cmd_dsh_install)
 

@@ -1,195 +1,186 @@
-# CrossWire
+# SideWire
 
-让一台机器上的 AI Agent 直接操作另一台机器。同一个局域网就行，不用 SSH，不用装一堆东西。
+Drive a Linux box from an AI agent running on Windows. Same LAN is enough. No SSH, nothing to install on the Linux side.
 
-主电脑跑 Windows + Agent（DeepSeek Harness、Claude、Codex 都行），副电脑跑 Linux。装完之后 Agent 就能在副电脑上跑命令、读写文件、看进程、重启服务，跟在本地差不多。
+The Windows machine has the agent (DeepSeek Harness, Claude, Codex, doesn't matter). The Linux machine runs one Python file. After that the agent can run commands, read and write files, look at processes, restart services. Roughly like working locally.
 
 ```
-你（Windows）── MCP stdio ──> crosswire ──TCP──> crosswire_agentd（Linux）
+you (Windows) -- MCP stdio --> sidewire -- TCP --> sidewire_agentd (Linux)
 ```
 
----
+## Why another one
 
-## 为什么又写了一个
+I had `winremote-deploy-kit` first. That one wrapped someone else's project: install a service, open a firewall port, add a relay to work around `Session not found`. It also only did Windows to Windows.
 
-上一个仓库 `winremote-deploy-kit` 是给 `winremote-mcp` 做部署的，本质上是往别人的东西外面套了一层壳：装服务、开防火墙、加一个中继解决 `Session not found`。
+The awkward part was the base it sat on. Streamable HTTP keeps session state on the server. Restart the server and the `mcp-session-id` in the client's hand is stale, but the connection itself stays up. You end up with a client that looks connected and fails every tool call. The relay existed to patch that.
 
-用着别扭。别扭的地方不在于它不好用，而在于它解决的是 Windows 控制 Windows，而且底子是 streamable HTTP —— 服务端一重启，客户端手里那个 `mcp-session-id` 就废了，HTTP 连接又不断，于是出现"看起来连着，其实一个工具都调不动"这种状态。中继就是在补这个洞。
+So the problem came from the transport, not from the code around it. This time I wrote the wire protocol.
 
-洞是从协议选型那儿来的。所以这次干脆不套了，自己写线协议：
+- One long-lived TCP connection, my own binary frames. 16-byte header, CRC32 over the payload.
+- Every frame carries a stream id, so requests really do run in parallel. A 40-minute compile doesn't block the `fs_read` behind it.
+- No sessions on the server. The connection is the session. Kill the process and the socket dies; the client reconnects and re-authenticates. There's no in-between state to get stuck in.
 
-- 一条 TCP 长连接，上面跑自己的二进制帧，16 字节头 + CRC32
-- 帧里带 stream id，多个请求真正并行，跑一个 40 分钟的编译不会把后面的 `fs_read` 堵住
-- **服务端没有 session 这个概念**。连接就是 session。进程挂了 socket 就断，客户端重连重认证，没有中间态
+The cost is that I maintain a protocol now. The benefit is that the above stops happening.
 
-代价是协议得自己维护。好处是上面那些坑不存在了。
+## Install
 
----
+Three steps. Pretend the Linux box is `192.168.1.50`.
 
-## 跑起来
-
-三步。假设副电脑是 `192.168.1.50`。
-
-**1. 主电脑（Windows）装客户端**
+**1. Windows side**
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install-client.ps1
 ```
 
-它会找 Python、把东西复制到 `%LOCALAPPDATA%\crosswire`、生成一把 key、然后问要不要顺手注册进 DeepSeek Harness。不想让它碰 DSH 就加 `-NoDsh`。
+It finds Python, copies things into `%LOCALAPPDATA%\sidewire`, makes a key, then asks whether it should register itself into DeepSeek Harness. Pass `-NoDsh` to skip that question, or `-InstallDir D:\tools\sidewire` if you don't want it under AppData.
 
-**2. 副电脑（Linux）装 agentd**
+**2. Linux side**
 
-把 `agent/` 整个目录拷过去（U 盘、scp、微信传文件都行），然后：
+Copy the `agent/` directory across. USB stick, scp, whatever you have.
 
 ```bash
 sudo ./install-agent.sh --allow-sudo --allow-pkg
 ```
 
-脚本干四件事：把 `crosswire_agentd.py` 放进 `/opt/crosswire`、生成 key 到 `/etc/crosswire/agent.key`、写一个 systemd unit、尽力开一下防火墙（ufw 或 firewalld，认不出来就算了）。
+Four things happen: `sidewire_agentd.py` lands in `/opt/sidewire`, a key is generated at `/etc/sidewire/agent.key`, a systemd unit gets written, and it tries to open the firewall (ufw or firewalld, gives up quietly if it finds neither).
 
-结束时会打印 key 和 IP，长这样：
+It prints the key and address when it finishes:
 
 ```
   address  : 192.168.1.50
   port     : 7900
-  key      : cw1_9f3a...e21c
+  key      : sw1_9f3a...e21c
 ```
 
-**3. 回主电脑登记这台机器**
+**3. Back on Windows**
 
 ```bash
-python cw.py add sub 192.168.1.50 --key cw1_9f3a...e21c --default
-python cw.py doctor
+python sw.py add sub 192.168.1.50 --key sw1_9f3a...e21c --default
+python sw.py doctor
 ```
 
-`sub` 是别名，你想叫 `xiaodi`、`lab`、`nas` 都行。`doctor` 会把配置、key、连通性、agent 版本全过一遍，有毛病会直接说是哪一步。
+`sub` is just an alias. Call it `lab`, `spare`, `nas`, whatever. `doctor` walks config, key, connectivity and agent version, and tells you which one broke.
 
-顺手验一下：
+Then try it:
 
 ```bash
-python cw.py sh "uname -a && df -h"
+python sw.py sh "uname -a && df -h"
 ```
 
----
+## Telling the agent about it
 
-## Agent 那边怎么接
+For DeepSeek Harness:
 
-DeepSeek Harness 的话，`cw.py dsh-install` 就完事了，它会往 `~/.dsh/profiles/*/cordis.patch.yml` 里插一段：
-
-```yaml
-- insert:
-    - id: mcp-crosswire
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        serverName: crosswire
-        transport: stdio
-        command: 'C:\...\python.exe'
-        args: ['C:\...\cw.py', 'serve']
-        toolCallTimeoutMs: 600000
-        failOnStartupError: false
+```bash
+python sw.py dsh-install
 ```
 
-Claude Desktop / Cursor 这类吃 JSON 的，`python cw.py mcp-config --client claude` 会打印现成的块，粘进去就行。
+One warning, because this cost me an evening: DSH keeps MCP config in **two different places**, and which one matters depends on how you start it.
 
-Codex 用 `--client codex`。
+| How you start DSH | File it reads |
+|---|---|
+| `dsh` from a terminal | `~/.dsh/profiles/<name>/cordis.patch.yml` |
+| the desktop app | `~/.dsh/.agent-presets/<name>/agent.cordis.yml` |
 
----
+`dsh-install` writes both now. Earlier versions only did the first, which meant the desktop app silently ignored the whole thing — no error, nothing in the log, the tools just never showed up. `--preset <name>` targets one preset, `--no-preset` stays on profiles only.
 
-## 30 个工具
+The desktop app reads presets once at startup, so close it properly and reopen. Quitting to the tray doesn't count.
 
-工具名都尽量短，Agent 不用记长名字。全部支持一个可选的 `host` 参数，多台机器的时候用它切。
+For Claude Desktop, Cursor and anything else that takes a JSON block:
 
-**认机器**：`hosts`（有哪些机器、通不通）、`host_info`（是什么系统、什么权限）、`host_probe`（延迟）
-
-**跑命令**：`run`、`run_script`（写临时文件再执行，省掉引号地狱）、`job_list`、`job_poll`、`job_kill`
-
-**交互式**：`tty_open`、`tty_write`、`tty_read`、`tty_close` —— 真 PTY，能 ssh 到第三台机器、能跑交互式安装程序
-
-**文件**：`fs_ls`、`fs_read`、`fs_write`、`fs_edit`（改一处，不动整个文件）、`fs_stat`、`fs_find`、`fs_grep`（在目标机上搜，不用把树搬过来）、`fs_manage`（mkdir/rm/mv/cp/chmod/chown/symlink/truncate 合一个）、`fs_pull`、`fs_push`、`fs_tail`、`fs_hash`
-
-**系统**：`proc_list`、`proc_kill`、`svc`（systemctl/openrc/sysv 自动认）、`net`（网卡/监听端口/连通性探测/DNS）、`pkg`（apt/dnf/pacman/zypper/apk 自动认）、`power`
-
-`fs_pull` 值得单说一句。它把远端文件拉到本机磁盘然后返回本地路径，Agent 拿自己的文件工具去读。二进制、图片、几十兆的日志都走这条，比 base64 塞进上下文强太多。
-
----
-
-## 几个设计上的取舍
-
-**为什么不用 HTTP。** 试过。HTTP 那套要么长轮询要么 SSE，为了在一条连接上多路复用要引入一堆语义，而且"连接正常但会话失效"这个状态天然存在。裸 TCP 上自己划帧反而简单，错了就是连接断了，重连就完事。
-
-**为什么不直接 SSH。** SSH 在，但 Agent 用 SSH 有几个实际问题：密码/密钥管理、每次 exec 都要新建会话（慢）、输出和退出码要自己拼、超时和进程组处理很烦。另外 Windows 上默认没有 ssh 客户端的情况也不少。这些都能解决，但解决完就是重写一遍我现在写的东西。
-
-**加密。** 没上 TLS，因为不想为了自签证书引入 openssl 依赖。用的是 stdlib 里能拼出来的东西：HMAC-SHA256 计数器模式做密钥流，再加 8 字节截断 tag，encrypt-then-MAC。挡得住局域网里随手抓包看到路径和命令，挡不住有心人。真跨网请套 WireGuard 或者 Tailscale，别指望这个。
-
-**帧顺序。** 这个坑值得记一下：seal 和 write 必须是一个原子操作。第一版拆开写，12 个并发请求就把计数器搞乱序了，对端直接报 `bad frame tag`。现在两边都是一把锁包住"加密+发送"。
-
----
-
-## 实测
-
-`python tests/e2e.py` 会真的拉起一个 agentd，然后用真客户端打 27 项，覆盖握手、错 key 拒绝、命令执行、退出码、超时转 job、PTY、文件全套、300KB 二进制往返、输出截断、`allow_root` 越权拦截、12 路并发、断线重连。
-
-本机（Windows 自测，走 loopback）：
-
-```
-27/27 passed
+```bash
+python sw.py mcp-config --client claude
 ```
 
-外加 `tests/test_protocol.py` 18 项（帧编解码、CRC、密钥流、tag 篡改、计数器乱序、agent 与客户端两份协议实现逐字节比对）和 `tests/test_mcp.py` 13 项（JSON-RPC 握手、协议版本协商、tools/list、tools/call、错误映射）。
+Codex uses `--client codex`. It prints the block, you paste it in.
 
-几个数字：`sys.ping` 往返 0.3ms 左右，文件读写 1~5ms，300KB 二进制推+拉 90ms。命令执行在 Linux 上基本就是命令本身的耗时，Windows 上每次要起一个 `cmd.exe`，会多 120ms 左右 —— 那是系统开销，不是协议开销。
+## The 30 tools
 
----
+Names are short on purpose. Every one takes an optional `host` argument, which is how you switch between machines.
 
-## 权限，以及别干的事
+**Which machines**: `hosts`, `host_info`, `host_probe` (latency)
 
-这套东西等价于把副电脑的 shell 交出去。装的时候想清楚。
+**Commands**: `run`, `run_script` (writes a temp file and runs it, so you skip quote hell), `job_list`, `job_poll`, `job_kill`
 
-- **key 就是全部**。`/etc/crosswire/agent.key` 和主电脑 `~/.crosswire/` 里那份，泄露等于机器被接管
-- 默认 `--allow-root /` 也就是全盘可读写。想收窄就 `--allow-root /home/you/project`，越界会直接返回 `denied`
-- `--allow-sudo`、`--allow-pkg`、`--allow-power` 三个开关默认全关。`power` 还额外要求 `confirm` 参数跟动作名一字不差
-- **不要做公网端口映射**。真需要跨网，WireGuard / Tailscale，再加 `--allow-cidr 10.0.0.0/24`
-- 每条请求都会写审计日志（地址、方法、耗时、成败、参数摘要），在 `journalctl -u crosswire-agentd`
+**Interactive**: `tty_open`, `tty_write`, `tty_read`, `tty_close`. Real PTY. You can ssh onward to a third machine or drive an interactive installer.
 
----
+**Files**: `fs_ls`, `fs_read`, `fs_write`, `fs_edit` (patch one spot, leave the rest alone), `fs_stat`, `fs_find`, `fs_grep` (search on the target instead of pulling the tree over), `fs_manage` (mkdir/rm/mv/cp/chmod/chown/symlink/truncate in one), `fs_pull`, `fs_push`, `fs_tail`, `fs_hash`
 
-## 已知问题
+**System**: `proc_list`, `proc_kill`, `svc` (systemctl, openrc or sysv, detected), `net` (interfaces, listening ports, reachability, DNS), `pkg` (apt, dnf, pacman, zypper, apk, detected), `power`
 
-- Windows 上跑 agentd 时 `tty` 是假的（管道模拟，不是 PTY），`proc_list` 也会退化。Windows 只是拿来测协议用的，正经用请装在 Linux 上
-- `proc_list` 的 CPU% 是两次调用之间的差值，所以刚连上第一次调经常全是 0，第二次才准
-- `fs_grep` 是纯 Python 逐文件扫，几万个小文件会慢。真要快还是得让 Agent 直接 `run "grep -r"`
-- 没做压缩，文本传输是原样。局域网够快，懒得加
-- 断线重连只在"下一次请求"时发生，没有主动心跳重连（有心跳包保活，但不自动重拨）
+`fs_pull` deserves a note. It downloads the file to local disk and hands back a local path, so the agent can use its own file tools on it. Binaries, images, a 50 MB log — all of that goes this way instead of base64 into the context window.
 
----
+## Design choices, briefly
 
-## 目录
+**Not HTTP.** Tried it. HTTP needs either long polling or SSE, and multiplexing over one connection means inventing a lot of semantics. "Connection fine, session dead" is a state that exists by construction. Frames on raw TCP are simpler: if something is wrong the connection breaks and you reconnect.
+
+**Not plain SSH.** SSH is right there and the agent could just use it, but a few things get annoying. Credential handling, a new session per exec (slow), assembling output and exit codes by hand, timeouts and process groups. Plenty of Windows boxes also ship without an ssh client. All solvable, but solving them is most of what I wrote here anyway.
+
+**Crypto.** No TLS, because I didn't want an openssl dependency just for a self-signed cert. It's assembled from stdlib: HMAC-SHA256 in counter mode as the keystream, an 8-byte truncated tag, encrypt-then-MAC. Enough to stop someone casually sniffing the LAN from reading your paths and commands. Not enough for anyone actually trying. Anything off-LAN should go over WireGuard or Tailscale, don't count on this.
+
+**Frame ordering.** Worth remembering: seal and write have to be one atomic operation. The first version split them, and 12 concurrent requests were enough to put the counter out of order — the peer answered `bad frame tag`. Both sides now hold one lock across encrypt-and-send.
+
+## Tests
+
+```bash
+python tests/e2e.py             # 27
+python tests/test_protocol.py   # 18
+python tests/test_mcp.py        # 13
+python tests/test_dsh.py        #  7
+```
+
+65 total.
+
+`e2e.py` starts a real agentd and hits it with a real client. Handshake, wrong key rejected, command execution, exit codes, timeout turning into a job, PTY, the whole file family, a 300 KB binary round trip, output truncation, `allow_root` refusing an escape, 12 concurrent requests, reconnect after a drop.
+
+`test_protocol.py` covers frame encode/decode, CRC, keystream, tag tampering, counter reordering, plus a byte-for-byte comparison of the two protocol implementations. agentd is a single file, so it carries its own copy of the protocol code, and that test is what keeps the copies honest.
+
+`test_dsh.py` parses the generated DSH YAML back in both shapes. Wrong nesting still produces a file that looks fine and gets ignored, which is the failure mode worth testing for.
+
+Numbers from this machine: `sys.ping` around 0.3 ms, file read/write 1-5 ms, 300 KB push and pull 90 ms. Command execution on Linux is basically the command's own time. On Windows every exec spawns a `cmd.exe`, so add about 120 ms. That's the OS, not the protocol.
+
+## Permissions, and things not to do
+
+This hands over a shell. Think about it while installing, not after.
+
+- **The key is everything.** `/etc/sidewire/agent.key` and the copy in `~/.sidewire/` on the Windows side. Leaking either is equivalent to losing the machine.
+- The default is `--allow-root /`, meaning the whole filesystem is readable and writable. Narrow it with `--allow-root /home/you/project`; anything outside comes back `denied`.
+- `--allow-sudo`, `--allow-pkg` and `--allow-power` are all off by default. `power` also wants a `confirm` argument that has to match the action name exactly.
+- **Don't port-forward this to the internet.** If you need it across networks, WireGuard or Tailscale plus `--allow-cidr 10.0.0.0/24`.
+- Every request goes to the audit log (address, method, duration, result, argument summary). `journalctl -u sidewire-agentd`.
+
+## Known issues
+
+- Running agentd on Windows gives you a fake `tty` (a pipe, not a PTY) and a degraded `proc_list`. Windows is only there so I could test the protocol. Use Linux for real.
+- `proc_list` CPU% is a delta between two calls, so the first call after connecting usually reports zeros.
+- `fs_grep` walks files in pure Python. Tens of thousands of small files will be slow. If it matters, have the agent `run "grep -r"` instead.
+- No compression. Text goes over as-is. The LAN is fast enough that I didn't bother.
+- Reconnect happens on the next request, not proactively. There's a keepalive ping but it doesn't redial on its own.
+- If the target is a shared machine and the other person should be able to cut you off, don't install a service. Use `agent/run-on-windows.bat`, which binds only to the Radmin LAN address and dies when its window closes. `docs/DEPLOY.md` explains the trade-off.
+
+## Layout
 
 ```
-crosswire/            客户端（MCP 服务 + CLI）
-  protocol.py         帧格式、加解密、握手
-  client.py           连接、多路复用、文件传输
-  config.py           ~/.crosswire/hosts.json
-  cli.py              命令行
-  mcp/server.py       JSON-RPC stdio
-  mcp/tools.py        30 个工具的定义和处理
+sidewire/            client (MCP server + CLI)
+  protocol.py         frame format, sealing, handshake
+  client.py           connection, multiplexing, file transfer
+  config.py           ~/.sidewire/hosts.json
+  cli.py              command line
+  mcp/server.py       JSON-RPC over stdio
+  mcp/tools.py        the 30 tool definitions and handlers
 agent/
-  crosswire_agentd.py 单文件守护进程，纯标准库，直接读 /proc
-  install-agent.sh    一键装
-cw.py                 免安装启动器
-docs/                 协议、部署、安全、给 Agent 的操作规范
-tests/                58 项测试
+  sidewire_agentd.py single-file daemon, stdlib only, reads /proc directly
+  install-agent.sh    one-shot installer (Linux)
+  run-on-windows.bat  foreground launcher for a Windows target, no service
+sw.py                 launcher, no install needed
+docs/                 protocol, deployment, security, agent notes
+tests/                65 tests
 ```
 
-agentd 是故意做成单文件的。拷一个 `.py` 过去就能跑，没有依赖，没有虚拟环境，没有 `pip install`。代价是协议那部分代码在客户端和 agentd 里各有一份，靠 `test_protocol.py` 里那个逐字节比对的测试盯着。
+agentd is a single file on purpose. Copy one `.py` over and it runs. No dependencies, no virtualenv, no `pip install`. The price is that the protocol code exists twice, once in the client and once in agentd, and `test_protocol.py` exists to keep the two identical.
 
----
+## License
 
-## 许可
+MIT.
 
-MIT。
-
----
-
-名字是随便起的。wire 指两台机器之间那根线，cross 就是跨过去。你要不喜欢，改个名就行，代码里没有硬编码的地方。
+The name is arbitrary. Wire is the thing between two machines, cross is going across it. Rename it if you don't like it, nothing is hardcoded.

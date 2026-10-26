@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "crosswire"
+name = "sidewire"
 version = "1.0.0"
 description = "Let an AI agent on one machine drive another machine on the same LAN. No SSH, no HTTP, no dependencies."
 readme = "README.md"
@@ -20,14 +20,14 @@ classifiers = [
 dependencies = []
 
 [project.scripts]
-crosswire = "crosswire.cli:main"
+sidewire = "sidewire.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/DUQiXun/crosswire"
-Source = "https://github.com/DUQiXun/crosswire"
+Homepage = "https://github.com/DUQiXun/sidewire"
+Source = "https://github.com/DUQiXun/sidewire"
 
 [tool.setuptools]
-packages = ["crosswire", "crosswire.mcp"]
+packages = ["sidewire", "sidewire.mcp"]
 
 [tool.setuptools.package-data]
-crosswire = ["py.typed"]
+sidewire = ["py.typed"]

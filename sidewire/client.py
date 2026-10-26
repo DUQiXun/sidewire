@@ -1,4 +1,4 @@
-"""Client side of CrossWire: one multiplexed TCP connection per host.
+"""Client side of SideWire: one multiplexed TCP connection per host.
 
 The client keeps a single socket per host alive and dispatches concurrent
 requests over it.  If the socket dies it is dropped; the next request dials a
@@ -46,7 +46,7 @@ class _BlobSink(object):
 
     def __init__(self, path):
         self.path = path
-        self.tmp = path + ".cw-part"
+        self.tmp = path + ".sw-part"
         self.fh = open(self.tmp, "wb")
         self.hasher = hashlib.sha256()
         self.received = 0
@@ -99,7 +99,7 @@ class _AckSink(object):
 
 
 class Remote(object):
-    """A live connection to one CrossWire agent."""
+    """A live connection to one SideWire agent."""
 
     def __init__(self, host_entry, key_text, limits=None, logger=None):
         self.entry = host_entry
@@ -167,7 +167,7 @@ class Remote(object):
     def _handshake(self):
         nonce_c = os.urandom(16)
         self.writer.write_json(P.T_HELLO, 0, {
-            "v": P.VERSION, "nonce": nonce_c.hex(), "client": "crosswire/1.0",
+            "v": P.VERSION, "nonce": nonce_c.hex(), "client": "sidewire/1.0",
         })
         frame = self.reader.read()
         if frame.type == P.T_AUTH_FAIL:
@@ -184,7 +184,7 @@ class Remote(object):
         self.writer.write_json(P.T_AUTH, 0, {
             "proof": P.client_proof(self.key, nonce_c, nonce_s).hex(),
             "crypto": "hmac-ctr" if crypto != "none" else "none",
-            "client": "crosswire/1.0",
+            "client": "sidewire/1.0",
         })
         frame = self.reader.read()
         if frame.type == P.T_AUTH_FAIL:

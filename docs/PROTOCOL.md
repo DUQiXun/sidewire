@@ -1,7 +1,7 @@
 # Wire protocol (CWP/1)
 
 This is the whole protocol. If you want to write a client in another language,
-this file plus `crosswire/protocol.py` is all you need.
+this file plus `sidewire/protocol.py` is all you need.
 
 ## 1. Frame
 
@@ -143,7 +143,7 @@ C: BLOB sid=<sid> …  with FIN on the last frame (payload empty)
 S: EVT  sid=<sid> {k:"blob_done", ok:true, bytes, sha256}
 ```
 
-The receiver writes to `<path>.cw-part` and `os.replace()`s it into place only
+The receiver writes to `<path>.sw-part` and `os.replace()`s it into place only
 after size and sha256 match. A failed transfer leaves no half file behind.
 
 ## 7. Request / response

@@ -1,9 +1,9 @@
 """
-CrossWire wire protocol, v1.
+SideWire wire protocol, v1.
 
 Design notes
 ------------
-CrossWire does not speak HTTP.  It puts a 16-byte binary header in front of
+SideWire does not speak HTTP.  It puts a 16-byte binary header in front of
 every message and multiplexes an arbitrary number of logical streams over one
 long-lived TCP connection.
 
@@ -277,12 +277,19 @@ def new_nonce():
 
 
 def parse_key(text):
-    """Accept 64 hex chars, 32-byte raw, or ``cw1_``-prefixed hex."""
+    """Accept 64 hex chars, 32-byte raw, or a ``sw1_``-prefixed hex string.
+
+    Any short prefix is tolerated, not just ``sw1_``. The prefix is a label,
+    not part of the secret, and people migrate old keys around by hand. The
+    project used to call itself something else, so keys in the wild still
+    carry the old prefix; refusing those would be a pointless break.
+    """
     if isinstance(text, bytes):
         text = text.decode("ascii", "ignore")
     text = (text or "").strip()
-    if text.startswith("cw1_"):
-        text = text[4:]
+    head, sep, tail = text.partition("_")
+    if sep and len(head) <= 8 and tail and all(c in "0123456789abcdefABCDEF" for c in tail):
+        text = tail
     text = text.replace("-", "").replace(" ", "")
     try:
         raw = bytes.fromhex(text)
@@ -294,7 +301,7 @@ def parse_key(text):
 
 
 def format_key(raw):
-    return "cw1_" + raw.hex()
+    return "sw1_" + raw.hex()
 
 
 def gen_key(nbytes=32):

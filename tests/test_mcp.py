@@ -18,8 +18,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from crosswire import config as cfgmod  # noqa: E402
-from crosswire import protocol as P     # noqa: E402
+from sidewire import config as cfgmod  # noqa: E402
+from sidewire import protocol as P     # noqa: E402
 
 RESULTS = []
 
@@ -114,7 +114,7 @@ def tool_text(resp):
 
 def main():
     tmp = tempfile.mkdtemp(prefix="cw-mcp-")
-    os.environ["CROSSWIRE_HOME"] = tmp
+    os.environ["SIDEWIRE_HOME"] = tmp
     port = free_port()
     key = P.format_key(P.gen_key(32))
     key_file = os.path.join(tmp, "agent.key")
@@ -123,7 +123,7 @@ def main():
     os.makedirs(work, exist_ok=True)
 
     agent = subprocess.Popen(
-        [sys.executable, os.path.join(ROOT, "agent", "crosswire_agentd.py"),
+        [sys.executable, os.path.join(ROOT, "agent", "sidewire_agentd.py"),
          "--bind", "127.0.0.1", "--port", str(port), "--key-file", key_file,
          "--workdir", work],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -135,8 +135,8 @@ def main():
                         note="e2e target")
 
         env = dict(os.environ)
-        env["CROSSWIRE_HOME"] = tmp
-        cli = McpClient([sys.executable, os.path.join(ROOT, "cw.py"), "serve"], env)
+        env["SIDEWIRE_HOME"] = tmp
+        cli = McpClient([sys.executable, os.path.join(ROOT, "sw.py"), "serve"], env)
         try:
             def t_initialize():
                 resp = cli.call("initialize", {
@@ -146,7 +146,7 @@ def main():
                 })
                 res = resp["result"]
                 eq(res["protocolVersion"], "2025-06-18", "version")
-                truthy(res["serverInfo"]["name"] == "crosswire", "serverInfo")
+                truthy(res["serverInfo"]["name"] == "sidewire", "serverInfo")
                 truthy("tools" in res["capabilities"], "capabilities")
                 cli.notify("notifications/initialized")
             check("initialize", t_initialize)

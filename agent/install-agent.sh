@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CrossWire agent installer for the machine you want to control (Linux).
+# SideWire agent installer for the machine you want to control (Linux).
 #
 #   sudo ./install-agent.sh                 # install + start as a service
 #   sudo ./install-agent.sh --port 7900 --allow-sudo --allow-pkg
@@ -14,9 +14,9 @@ ALLOW_SUDO=0
 ALLOW_PKG=0
 ALLOW_POWER=0
 CIDR=""
-PREFIX=/opt/crosswire
-ETC=/etc/crosswire
-SERVICE=crosswire-agentd
+PREFIX=/opt/sidewire
+ETC=/etc/sidewire
+SERVICE=sidewire-agentd
 UNINSTALL=0
 
 while [ $# -gt 0 ]; do
@@ -47,19 +47,19 @@ if [ "$UNINSTALL" = "1" ]; then
     exit 0
 fi
 
-SRC="$(cd "$(dirname "$0")" && pwd)/crosswire_agentd.py"
+SRC="$(cd "$(dirname "$0")" && pwd)/sidewire_agentd.py"
 if [ ! -f "$SRC" ]; then
-    echo "crosswire_agentd.py not found next to this script" >&2
+    echo "sidewire_agentd.py not found next to this script" >&2
     exit 1
 fi
 
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
 
 install -d -m 755 "$PREFIX" "$ETC"
-install -m 755 "$SRC" "$PREFIX/crosswire_agentd.py"
+install -m 755 "$SRC" "$PREFIX/sidewire_agentd.py"
 
 if [ ! -f "$ETC/agent.key" ]; then
-    python3 "$PREFIX/crosswire_agentd.py" --keygen --out "$ETC/agent.key" >/dev/null
+    python3 "$PREFIX/sidewire_agentd.py" --keygen --out "$ETC/agent.key" >/dev/null
     chmod 600 "$ETC/agent.key"
     echo "generated a new key at $ETC/agent.key"
 else
@@ -74,13 +74,13 @@ EXTRA=""
 
 cat > "/etc/systemd/system/$SERVICE.service" <<UNIT
 [Unit]
-Description=CrossWire agent daemon
+Description=SideWire agent daemon
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$(command -v python3) $PREFIX/crosswire_agentd.py --key-file $ETC/agent.key --port $PORT$EXTRA
+ExecStart=$(command -v python3) $PREFIX/sidewire_agentd.py --key-file $ETC/agent.key --port $PORT$EXTRA
 Restart=always
 RestartSec=2
 LimitNOFILE=65536
@@ -114,10 +114,10 @@ cat <<DONE
 
   on the machine that runs your agent:
 
-    crosswire add sub ${IP:-<ip>} --key $KEY --default
+    sidewire add sub ${IP:-<ip>} --key $KEY --default
 
   check it:
 
-    crosswire ping sub
+    sidewire ping sub
 
 DONE

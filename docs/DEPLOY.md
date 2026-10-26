@@ -1,26 +1,26 @@
-# 部署
+# Deployment
 
-## 网络前提
+## Network
 
-两台机器在同一个二层网络里，或者至少能互相直连到端口。判断方法很简单，在副电脑上：
+Both machines need to be on the same layer-2 network, or at least able to reach each other's ports directly. On the Linux side:
 
 ```bash
 ip -4 addr | grep inet
 ```
 
-记下 `192.168.x.x` 或 `10.x.x.x` 这种。然后从主电脑：
+Note the `192.168.x.x` or `10.x.x.x` address. Then from Windows:
 
 ```powershell
 Test-NetConnection 192.168.1.50 -Port 7900
 ```
 
-`TcpTestSucceeded : True` 才算通。不通的话按这个顺序查：agentd 起没起 → 防火墙 → 是不是跨了网段（比如一个在 192.168.1.x 一个在 192.168.0.x 且没有路由）。
+`TcpTestSucceeded : True` or it isn't working. When it isn't, check in this order: is agentd running, is the firewall open, are the two machines on different subnets with no route between them.
 
 ---
 
-## 副电脑：装 agentd
+## Linux side: install agentd
 
-### 方式一：脚本（推荐）
+### Option 1: the script
 
 ```bash
 scp -r agent/ user@192.168.1.50:~/
@@ -28,111 +28,111 @@ ssh user@192.168.1.50
 cd ~/agent && sudo ./install-agent.sh --allow-sudo --allow-pkg
 ```
 
-没有 scp 也行，U 盘、`python3 -m http.server` 传、微信发文件都可以，就一个 `.py` 和两个附属文件。
+No scp is fine too. USB stick, `python3 -m http.server`, whatever. It's one `.py` and two small files.
 
-脚本会打印：
+The script prints:
 
 ```
   address  : 192.168.1.50
   port     : 7900
-  key      : cw1_9f3a...e21c
+  key      : sw1_9f3a...e21c
 ```
 
-### 方式二：手动
+### Option 2: by hand
 
 ```bash
-sudo mkdir -p /opt/crosswire /etc/crosswire
-sudo install -m 755 crosswire_agentd.py /opt/crosswire/
-sudo python3 /opt/crosswire/crosswire_agentd.py --keygen --out /etc/crosswire/agent.key
-sudo chmod 600 /etc/crosswire/agent.key
+sudo mkdir -p /opt/sidewire /etc/sidewire
+sudo install -m 755 sidewire_agentd.py /opt/sidewire/
+sudo python3 /opt/sidewire/sidewire_agentd.py --keygen --out /etc/sidewire/agent.key
+sudo chmod 600 /etc/sidewire/agent.key
 ```
 
-先前台跑一次，看着它起来：
+Run it in the foreground once to watch it come up:
 
 ```bash
-sudo python3 /opt/crosswire/crosswire_agentd.py \
-     --key-file /etc/crosswire/agent.key --port 7900 --verbose
+sudo python3 /opt/sidewire/sidewire_agentd.py \
+     --key-file /etc/sidewire/agent.key --port 7900 --verbose
 ```
 
-应该看到：
+You should see:
 
 ```
-[info] crosswire agentd 1.0.0 starting (pid 1234, python 3.11.6)
+[info] sidewire agentd 1.0.0 starting (pid 1234, python 3.11.6)
 [info] agentd listening on 0.0.0.0:7900 (crypto=on, allow=any)
 ```
 
-然后 Ctrl-C，换成服务：
+Ctrl-C, then turn it into a service:
 
 ```bash
-sudo python3 /opt/crosswire/crosswire_agentd.py --print-unit \
-  | sudo tee /etc/systemd/system/crosswire-agentd.service
+sudo python3 /opt/sidewire/sidewire_agentd.py --print-unit \
+  | sudo tee /etc/systemd/system/sidewire-agentd.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now crosswire-agentd
-sudo systemctl status crosswire-agentd
+sudo systemctl enable --now sidewire-agentd
+sudo systemctl status sidewire-agentd
 ```
 
-防火墙：
+Firewall:
 
 ```bash
 sudo ufw allow 7900/tcp
-# 或者
+# or
 sudo firewall-cmd --permanent --add-port=7900/tcp && sudo firewall-cmd --reload
 ```
 
-### 参数说明
+### Flags
 
-| 参数 | 作用 |
+| Flag | What it does |
 |---|---|
-| `--bind` | 监听地址，默认 `0.0.0.0`。只想本机回环就 `127.0.0.1` |
-| `--port` | 默认 7900 |
-| `--key-file` | 密钥文件，600 权限 |
-| `--allow-cidr` | 只接受这些网段的连接，可重复。**强烈建议设**，比如 `--allow-cidr 192.168.1.0/24` |
-| `--allow-root` | 文件系统根，可重复，默认 `/`。收窄权限用 |
-| `--deny-root` | 显式拒绝的路径，优先级高于 allow-root |
-| `--allow-sudo` | 允许 `run(sudo=true)` |
-| `--allow-pkg` | 允许装/卸软件包 |
-| `--allow-power` | 允许重启关机 |
-| `--log` | 额外写一份日志到文件，systemd 下一般不需要 |
-| `--workdir` | 默认工作目录，默认是启动用户的 home |
-| `--no-crypto` | 关掉载荷加密。只在抓包调试时用 |
-| `--print-unit` | 打印 systemd unit 然后退出 |
+| `--bind` | Listen address, `0.0.0.0` by default. `127.0.0.1` for loopback only |
+| `--port` | Defaults to 7900 |
+| `--key-file` | Key file, mode 600 |
+| `--allow-cidr` | Only accept connections from these ranges. Repeatable. **Set this**, e.g. `--allow-cidr 192.168.1.0/24` |
+| `--allow-root` | Filesystem roots, repeatable, defaults to `/`. Use it to narrow things down |
+| `--deny-root` | Explicitly refused paths. Beats `--allow-root` |
+| `--allow-sudo` | Enables `run(sudo=true)` |
+| `--allow-pkg` | Enables installing and removing packages |
+| `--allow-power` | Enables reboot and shutdown |
+| `--log` | Extra log file. Usually unnecessary under systemd |
+| `--workdir` | Default working directory. The launching user's home by default |
+| `--no-crypto` | Disables payload sealing. Only for packet-capture debugging |
+| `--print-unit` | Print a systemd unit and exit |
 
 ---
 
-## 主电脑：装客户端
+## Windows side: install the client
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install-client.ps1
 ```
 
-默认装到 `%LOCALAPPDATA%\crosswire`。想换位置：`-InstallDir D:\tools\crosswire`。
+Goes to `%LOCALAPPDATA%\sidewire` by default. Somewhere else: `-InstallDir D:\tools\sidewire`.
 
-或者干脆不装，直接在这个目录里用 `python cw.py ...`，`cw.py` 自己会把路径塞进 `sys.path`。
+Or skip installing and run `python sw.py ...` straight out of the source directory. `sw.py` puts itself on `sys.path`.
 
-### 登记目标机
+### Register a target
 
 ```bash
-python cw.py add sub 192.168.1.50 --key cw1_9f3a...e21c --default --note "编译机"
+python sw.py add sub 192.168.1.50 --key sw1_9f3a...e21c --default --note "build box"
 ```
 
-`--key` 和 `--key-file` 二选一。也可以不放 hosts.json，改用环境变量：
+`--key` and `--key-file` are mutually exclusive. You can also skip hosts.json and use an environment variable:
 
 ```powershell
-$env:CROSSWIRE_KEY = "cw1_..."
+$env:SIDEWIRE_KEY = "sw1_..."
 ```
 
-优先级：hosts.json 里的 `key` > 环境变量 `CROSSWIRE_KEY` > hosts.json 里的 `key_file` > `~/.crosswire/key`。
+Precedence: `key` in hosts.json, then `SIDEWIRE_KEY`, then `key_file` in hosts.json, then `~/.sidewire/key`.
 
-### 验证
+### Check it
 
 ```bash
-python cw.py doctor
+python sw.py doctor
 ```
 
 ```
 config
-  home        C:\Users\you\.crosswire
-  hosts.json  C:\Users\you\.crosswire\hosts.json ok
+  home        C:\Users\you\.sidewire
+  hosts.json  C:\Users\you\.sidewire\hosts.json ok
   hosts       1 configured, default=sub
 python
   3.12.10 on Windows-11-...
@@ -144,71 +144,113 @@ all good
 
 ---
 
-## 接进 Agent
+## Wiring it into an agent
 
 ### DeepSeek Harness
 
 ```bash
-python cw.py dsh-install
+python sw.py dsh-install
 ```
 
-它会给 `~/.dsh/profiles/*/cordis.patch.yml` 每个文件末尾追加一段 `mcp-crosswire`。已经有的会跳过，重复跑没事。改完重启 dsh。
+It appends an `mcp-sidewire` entry to both places DSH reads from:
 
-只想给某一个 profile 装：
+- `~/.dsh/profiles/*/cordis.patch.yml`, which the `dsh` command line uses
+- `~/.dsh/.agent-presets/*/agent.cordis.yml`, which the desktop app uses
+
+Existing entries are skipped, so running it twice is harmless. Restart DSH afterwards, and note that the desktop app only re-reads presets at startup, so close it fully rather than minimising to the tray.
+
+Just one profile, or just one preset:
 
 ```bash
-python cw.py dsh-install --profile desktop
+python sw.py dsh-install --profile desktop
+python sw.py dsh-install --preset aaaa
+python sw.py dsh-install --no-preset
 ```
 
 ### Claude Desktop
 
 ```bash
-python cw.py mcp-config --client claude
+python sw.py mcp-config --client claude
 ```
 
-输出粘进 `claude_desktop_config.json`，重启客户端。
+Paste the output into `claude_desktop_config.json` and restart the client.
 
 ### Codex
 
 ```bash
-python cw.py mcp-config --client codex
+python sw.py mcp-config --client codex
 ```
 
 ---
 
-## 多台副电脑
+## Several Linux boxes
 
 ```bash
-python cw.py add build 192.168.1.50 --key cw1_aaa...
-python cw.py add gpu   192.168.1.51 --key cw1_bbb...
-python cw.py add nas   192.168.1.60 --key cw1_ccc... --default
+python sw.py add build 192.168.1.50 --key sw1_aaa...
+python sw.py add gpu   192.168.1.51 --key sw1_bbb...
+python sw.py add nas   192.168.1.60 --key sw1_ccc... --default
 ```
 
-Agent 那边先调 `hosts` 看清单，然后每个工具传 `host: "gpu"`。
+The agent calls `hosts` to see the list, then passes `host: "gpu"` to any tool.
 
-别名随便起，中文也行（YAML/JSON 都是 UTF-8）。建议起短一点，Agent 少打几个 token。
+Aliases can be anything, non-ASCII included (JSON is UTF-8). Keep them short, every tool call pays for the characters.
 
 ---
 
-## 排障
+## A Windows target, reachable only through Radmin LAN
+
+Sometimes the other machine is somewhere you can't touch, behind a NAT you don't
+control, and someone else uses it too. Radmin LAN (Radmin VPN) handles the network
+part: both machines join a named virtual network and get `26.x.x.x` addresses.
+agentd then binds to that address and nothing else.
+
+Run `agent\run-on-windows.bat` on the target. It is deliberately a console window,
+not a service:
+
+- it finds the `26.x.x.x` address and binds to it
+- it restricts the allowlist to `26.0.0.0/8`
+- it prints the `sw.py add` line to run on your side
+- **closing the window stops it, and nothing is left behind**
+
+That last point is the reason for the design. The machine may belong to someone
+else, or be shared. When they close Radmin VPN, the `26.x.x.x` interface goes away
+and the listener goes with it, so the connection is not merely refused, it has
+nowhere to arrive. If they close the agent window, even that is gone. There is no
+service, no scheduled task, no autostart entry to hunt down.
+
+If you want it permanent, don't use the `.bat`; install a service instead and
+accept that it will be running whether or not anyone is using the machine. Pick one
+or the other, not both.
+
+```
+target:  run-on-windows.bat  ->  binds 26.101.253.132:7900
+you:     python sw.py add far 26.101.253.132 --key sw1_...
+```
+
+Note the Windows agent has a fake `tty` (a pipe, not a PTY) and a degraded
+`proc_list`, same as running it anywhere on Windows. See Known issues in the README.
+
+---
+
+## Troubleshooting
 
 **`cannot reach 192.168.1.50:7900 (timed out)`**
-机器没开、agentd 没起、或者防火墙。先在副电脑上 `ss -tlnp | grep 7900` 看有没有监听，`0.0.0.0:7900` 才对，`127.0.0.1:7900` 说明 bind 错了。
+Machine is off, agentd isn't running, or a firewall. On the Linux side, `ss -tlnp | grep 7900`. It should say `0.0.0.0:7900`; `127.0.0.1:7900` means `--bind` is wrong.
 
 **`server rejected the key`**
-两边 key 不一样。副电脑上 `sudo cat /etc/crosswire/agent.key`，跟主电脑的 `~/.crosswire/hosts.json` 对一遍。注意 `cw1_` 前缀可以带也可以不带，解析的时候会剥掉。
+The two keys differ. `sudo cat /etc/sidewire/agent.key` and compare against `~/.sidewire/hosts.json`. The `sw1_` prefix is optional on input, it gets stripped during parsing.
 
 **`denied: path outside allowed roots`**
-agentd 启动时带了 `--allow-root`，路径不在范围内。要么改参数，要么用范围内的路径。
+agentd was started with `--allow-root` and the path is outside it. Change the flag or use a path inside it.
 
 **`denied: sudo is disabled by the agent policy`**
-副电脑没 `--allow-sudo`，而且 sudo 也不是 NOPASSWD。两个办法：加参数，或者给这个用户配 `NOPASSWD`。
+No `--allow-sudo`, and sudo isn't NOPASSWD either. Either add the flag or configure NOPASSWD for that user.
 
-**连上了但工具全报 `connection_lost`**
-看 `journalctl -u crosswire-agentd -n 50`。如果是 `bad frame tag`，说明两边版本不一致（协议改过），统一一下。
+**Connected, but every tool returns `connection_lost`**
+`journalctl -u sidewire-agentd -n 50`. If it says `bad frame tag`, the two sides are running different versions — the protocol changed at some point, so bring both up to date.
 
-**`sys.info` 返回的 `ipv4` 是空的**
-容器里没有 `/sys/class/net`，也没有 `ip` 命令。不影响其他功能，`net` 工具可能也会退化。
+**`sys.info` returns an empty `ipv4`**
+No `/sys/class/net` and no `ip` command, which is normal inside a minimal container. Nothing else breaks, though `net` may be degraded too.
 
-**PTY 里中文乱码**
-agentd 的 shell 环境没有 `LANG`。启动 unit 里加 `Environment=LANG=C.UTF-8`，或者在 `tty_open` 之后先 `export LANG=C.UTF-8`。
+**Non-ASCII text is mangled in a PTY**
+The agentd shell has no `LANG`. Add `Environment=LANG=C.UTF-8` to the unit, or `export LANG=C.UTF-8` after `tty_open`.

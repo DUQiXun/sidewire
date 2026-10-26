@@ -15,12 +15,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from crosswire import protocol as P  # noqa: E402
+from sidewire import protocol as P  # noqa: E402
 
 
 def load_agentd():
-    path = os.path.join(ROOT, "agent", "crosswire_agentd.py")
-    spec = importlib.util.spec_from_file_location("crosswire_agentd_under_test", path)
+    path = os.path.join(ROOT, "agent", "sidewire_agentd.py")
+    spec = importlib.util.spec_from_file_location("sidewire_agentd_under_test", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -141,7 +141,7 @@ class TestKeys(unittest.TestCase):
     def test_parse_and_format(self):
         raw = os.urandom(32)
         text = P.format_key(raw)
-        self.assertTrue(text.startswith("cw1_"))
+        self.assertTrue(text.startswith("sw1_"))
         self.assertEqual(P.parse_key(text), raw)
         self.assertEqual(P.parse_key(text[4:]), raw)
 
@@ -156,6 +156,22 @@ class TestKeys(unittest.TestCase):
     def test_agent_parses_the_same_key(self):
         text = P.format_key(os.urandom(32))
         self.assertEqual(AGENT.parse_key(text), P.parse_key(text))
+
+    def test_foreign_prefix_still_parses(self):
+        # The project was called something else before the rename, so keys
+        # already deployed on live machines carry a different label. The
+        # prefix is a label, not part of the secret: refusing it would break
+        # every existing install for no gain.
+        raw = os.urandom(32)
+        for prefix in ("cw1_", "sw1_", "key_", "k_"):
+            self.assertEqual(P.parse_key(prefix + raw.hex()), raw)
+            self.assertEqual(AGENT.parse_key(prefix + raw.hex()), raw)
+
+    def test_underscore_in_bare_hex_is_not_treated_as_prefix(self):
+        # 64 hex chars contain no underscore, so a raw key must pass through
+        # untouched; this guards against over-eager prefix stripping
+        raw = os.urandom(32)
+        self.assertEqual(P.parse_key(raw.hex()), raw)
 
 
 if __name__ == "__main__":

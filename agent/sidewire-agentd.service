@@ -1,11 +1,11 @@
 [Unit]
-Description=CrossWire agent daemon
+Description=SideWire agent daemon
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/crosswire/crosswire_agentd.py --key-file /etc/crosswire/agent.key --port 7900
+ExecStart=/usr/bin/python3 /opt/sidewire/sidewire_agentd.py --key-file /etc/sidewire/agent.key --port 7900
 Restart=always
 RestartSec=2
 LimitNOFILE=65536

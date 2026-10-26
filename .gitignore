@@ -6,9 +6,9 @@ dist/
 .venv/
 venv/
 *.log
-*.cw-part
-*.cw-bak
-.crosswire/
+*.sw-part
+*.sw-bak
+.sidewire/
 hosts.json
 agent.key
 key

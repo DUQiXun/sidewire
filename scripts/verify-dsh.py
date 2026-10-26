@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify that DeepSeek Harness can actually boot the registered MCP server.
 
-It reads the real `cordis.patch.yml` files, extracts the `mcp-crosswire`
+It reads the real `cordis.patch.yml` files, extracts the `mcp-sidewire`
 entry, launches it exactly the way dsh would (same command, args, cwd, env),
 and runs an MCP handshake plus `tools/list` against it.
 
@@ -47,7 +47,7 @@ def find_entries(profile=None):
             if not isinstance(entry, dict):
                 continue
             for item in entry.get("insert") or []:
-                if item.get("id") == "mcp-crosswire":
+                if item.get("id") == "mcp-sidewire":
                     found.append((name, item.get("config") or {}))
     return found
 
@@ -129,7 +129,7 @@ def main():
 
     entries = find_entries(args.profile)
     if not entries:
-        print("no mcp-crosswire entry found under %s" % os.path.join(dsh_home(), "profiles"))
+        print("no mcp-sidewire entry found under %s" % os.path.join(dsh_home(), "profiles"))
         return 1
     bad = 0
     for name, cfg in entries:

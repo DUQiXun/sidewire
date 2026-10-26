@@ -6,7 +6,7 @@ import sys
 import os
 
 PY = sys.executable
-CW = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cw.py"))
+CW = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sw.py"))
 
 CASES = [
     ("hosts", {}),

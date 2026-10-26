@@ -7,8 +7,8 @@ import subprocess
 import sys
 
 PY = sys.executable
-CW = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cw.py"))
-HOSTS = os.path.expanduser(r"~\.crosswire\hosts.json")
+CW = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sw.py"))
+HOSTS = os.path.expanduser(r"~\.sidewire\hosts.json")
 
 
 def main():
