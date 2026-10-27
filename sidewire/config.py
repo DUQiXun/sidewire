@@ -34,6 +34,10 @@ _SCHEMA = {
         "default_timeout": 60,
         "connect_timeout": 5,
         "keepalive": 15,
+        "auto_discover": True,
+        "discover_fast_dial": 1.5,
+        "discover_scan_timeout": 0.25,
+        "discover_probe_timeout": 2.0,
     },
 }
 

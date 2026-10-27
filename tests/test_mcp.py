@@ -247,6 +247,44 @@ def main():
             check("protocol version negotiation", t_old_protocol_version)
         finally:
             cli.close()
+
+        # Slim mode: fewer advertised schemas, everything else behind `call`.
+        slim_env = dict(env)
+        slim_env["SIDEWIRE_TOOLS"] = "slim"
+        slim = McpClient([sys.executable, os.path.join(ROOT, "sw.py"), "serve"], slim_env)
+        try:
+            slim.call("initialize", {"protocolVersion": "2025-06-18",
+                                     "capabilities": {},
+                                     "clientInfo": {"name": "test", "version": "0"}})
+
+            def t_slim_list():
+                names = [t["name"] for t in slim.call("tools/list")["result"]["tools"]]
+                truthy(len(names) < 15, "fewer than 15 tools, got %d" % len(names))
+                truthy("call" in names, "dispatcher present")
+                truthy("run" in names, "workhorse still there")
+                truthy("proc_list" not in names, "long tail is hidden")
+            check("slim: tools/list is short", t_slim_list)
+
+            def t_slim_catalogue():
+                resp = slim.call("tools/call", {"name": "call", "arguments": {}})
+                listed = json.loads(tool_text(resp))["tools"]
+                eq(len(listed), 30, "full catalogue still reachable")
+            check("slim: call with no name lists all", t_slim_catalogue)
+
+            def t_slim_dispatch():
+                resp = slim.call("tools/call", {"name": "call", "arguments": {
+                    "name": "proc_list", "arguments": {"limit": 2}}})
+                truthy(not resp["result"].get("isError"), "no error")
+                truthy("processes" in tool_text(resp), "real payload")
+            check("slim: call dispatches", t_slim_dispatch)
+
+            def t_slim_bad_name():
+                resp = slim.call("tools/call", {"name": "call", "arguments": {
+                    "name": "no_such_tool"}})
+                truthy(resp["result"]["isError"], "reported as isError")
+            check("slim: unknown inner tool", t_slim_bad_name)
+        finally:
+            slim.close()
     finally:
         agent.terminate()
         try:

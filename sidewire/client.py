@@ -16,6 +16,7 @@ import time
 
 from . import protocol as P
 from . import config as cfgmod
+from . import discover
 
 
 class RemoteError(Exception):
@@ -98,6 +99,76 @@ class _AckSink(object):
         self.done.set()
 
 
+def _handshake_on(sock, key):
+    """Authenticate an open socket.  Returns the session bits, or raises.
+
+    Kept outside the class so the discovery sweep can verify a candidate
+    without building (and then throwing away) a whole Remote.
+    """
+    reader = P.Reader(sock)
+    writer = P.Writer(sock)
+    nonce_c = os.urandom(16)
+    writer.write_json(P.T_HELLO, 0, {
+        "v": P.VERSION, "nonce": nonce_c.hex(), "client": "sidewire/1.0",
+    })
+    frame = reader.read()
+    if frame.type == P.T_AUTH_FAIL:
+        info = frame.json()
+        raise RemoteError("auth_failed", info.get("error", "rejected"), detail=info)
+    if frame.type != P.T_CHALLENGE:
+        raise RemoteError("protocol", "expected CHALLENGE, got %r" % frame)
+    ch = frame.json()
+    if int(ch.get("v", 0)) != P.VERSION:
+        raise RemoteError("protocol", "version mismatch: server speaks v%s" % ch.get("v"))
+    nonce_s = bytes.fromhex(ch["nonce"])
+    crypto = ch.get("crypto", "none")
+
+    writer.write_json(P.T_AUTH, 0, {
+        "proof": P.client_proof(key, nonce_c, nonce_s).hex(),
+        "crypto": "hmac-ctr" if crypto != "none" else "none",
+        "client": "sidewire/1.0",
+    })
+    frame = reader.read()
+    if frame.type == P.T_AUTH_FAIL:
+        info = frame.json()
+        raise RemoteError("auth_failed",
+                          "server rejected the key (%s)" % info.get("error", ""),
+                          detail="the key on this side does not match the key file on the target")
+    if frame.type != P.T_AUTH_OK:
+        raise RemoteError("protocol", "expected AUTH_OK, got %r" % frame)
+    ok = frame.json()
+    expect = P.server_proof(key, nonce_c, nonce_s)
+    if not _safe_eq(bytes.fromhex(ok.get("proof", "")), expect):
+        raise RemoteError("auth_failed",
+                          "server failed to prove it knows the key",
+                          detail="possible man-in-the-middle or wrong key")
+    session = {"reader": reader, "writer": writer, "info": ok, "sealed": False,
+               "sealer_tx": None, "sealer_rx": None}
+    if crypto != "none":
+        sk = P.session_key(key, nonce_c, nonce_s)
+        session["sealer_tx"] = P.Sealer(sk)
+        session["sealer_rx"] = P.Sealer(sk)
+        session["sealed"] = True
+    return session
+
+
+def probe(host, port, key, timeout=2.0):
+    """Does *host* speak SideWire with *key*?  Returns its identity or None."""
+    sock = None
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.settimeout(timeout)
+        return _handshake_on(sock, key)["info"]
+    except Exception:  # noqa: BLE001 - a failed probe is just a miss
+        return None
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
 class Remote(object):
     """A live connection to one SideWire agent."""
 
@@ -133,29 +204,56 @@ class Remote(object):
     def connect(self, timeout=None):
         timeout = float(timeout or self.limits.get("connect_timeout") or 5)
         self._closed = False
+        # On a LAN a live host answers in milliseconds, so waiting the full
+        # timeout at an address that has gone stale is just dead time before
+        # the sweep that would have fixed it.
+        dial_timeout = timeout
+        if self.limits.get("auto_discover", True) and discover.is_lan_address(self.host):
+            fast = float(self.limits.get("discover_fast_dial") or 1.5)
+            dial_timeout = min(timeout, fast)
         try:
-            sock = socket.create_connection((self.host, self.port), timeout=timeout)
+            sock = socket.create_connection((self.host, self.port), timeout=dial_timeout)
         except OSError as exc:
-            raise RemoteError("unreachable",
-                              "cannot reach %s:%s (%s)" % (self.host, self.port, exc),
-                              detail="check the address, the agentd process, and the firewall")
+            moved = self._rediscover(exc)
+            if moved is None:
+                raise RemoteError("unreachable",
+                                  "cannot reach %s:%s (%s)" % (self.host, self.port, exc),
+                                  detail="check the address, the agentd process, and the firewall")
+            try:
+                sock = socket.create_connection((self.host, self.port), timeout=timeout)
+            except OSError as exc2:
+                raise RemoteError("unreachable",
+                                  "cannot reach %s:%s (%s)" % (self.host, self.port, exc2),
+                                  detail="address was rediscovered but the second dial failed")
         sock.settimeout(None)
         try:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except OSError:
             pass
         self.sock = sock
-        self.reader = P.Reader(sock)
-        self.writer = P.Writer(sock)
         try:
             self._handshake()
-        except Exception:
+        except RemoteError:
             try:
                 sock.close()
             except OSError:
                 pass
             self.sock = None
             raise
+        except (OSError, EOFError, ValueError) as exc:
+            # A peer that accepts and then hangs up, or answers with garbage.
+            # Left raw, this surfaces to the agent as "EOFError: connection
+            # reset", which says nothing about what to do next.
+            try:
+                sock.close()
+            except OSError:
+                pass
+            self.sock = None
+            raise RemoteError("connection_lost",
+                              "%s:%s dropped the connection during the handshake (%s)"
+                              % (self.host, self.port, exc),
+                              detail="agentd is probably restarting, or something other than "
+                                     "sidewire is listening on that port")
         self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
         self._reader_thread.start()
         ka = float(self.limits.get("keepalive") or 0)
@@ -164,48 +262,61 @@ class Remote(object):
             self._keepalive_thread.start()
         return self
 
-    def _handshake(self):
-        nonce_c = os.urandom(16)
-        self.writer.write_json(P.T_HELLO, 0, {
-            "v": P.VERSION, "nonce": nonce_c.hex(), "client": "sidewire/1.0",
-        })
-        frame = self.reader.read()
-        if frame.type == P.T_AUTH_FAIL:
-            info = frame.json()
-            raise RemoteError("auth_failed", info.get("error", "rejected"), detail=info)
-        if frame.type != P.T_CHALLENGE:
-            raise RemoteError("protocol", "expected CHALLENGE, got %r" % frame)
-        ch = frame.json()
-        if int(ch.get("v", 0)) != P.VERSION:
-            raise RemoteError("protocol", "version mismatch: server speaks v%s" % ch.get("v"))
-        nonce_s = bytes.fromhex(ch["nonce"])
-        crypto = ch.get("crypto", "none")
+    def _rediscover(self, exc):
+        """Sweep the local subnet for this host after a failed dial.
 
-        self.writer.write_json(P.T_AUTH, 0, {
-            "proof": P.client_proof(self.key, nonce_c, nonce_s).hex(),
-            "crypto": "hmac-ctr" if crypto != "none" else "none",
-            "client": "sidewire/1.0",
-        })
-        frame = self.reader.read()
-        if frame.type == P.T_AUTH_FAIL:
-            info = frame.json()
-            raise RemoteError("auth_failed",
-                              "server rejected the key (%s)" % info.get("error", ""),
-                              detail="the key on this side does not match the key file on the target")
-        if frame.type != P.T_AUTH_OK:
-            raise RemoteError("protocol", "expected AUTH_OK, got %r" % frame)
-        ok = frame.json()
-        expect = P.server_proof(self.key, nonce_c, nonce_s)
-        if not _safe_eq(bytes.fromhex(ok.get("proof", "")), expect):
-            raise RemoteError("auth_failed",
-                              "server failed to prove it knows the key",
-                              detail="possible man-in-the-middle or wrong key")
-        self.info = ok
-        if crypto != "none":
-            sk = P.session_key(self.key, nonce_c, nonce_s)
-            self.sealer_tx = P.Sealer(sk)
-            self.sealer_rx = P.Sealer(sk)
-            self.sealed = True
+        Returns the new address on success (already persisted to hosts.json),
+        or None when the sweep is disabled, pointless, or came up empty.
+        """
+        if not self.limits.get("auto_discover", True):
+            return None
+        if not discover.is_lan_address(self.host):
+            return None
+        if isinstance(exc, socket.gaierror):
+            pass  # name resolution failed; a sweep may still find the box
+        self.log("dial to %s:%s failed (%s); sweeping local subnet" % (self.host, self.port, exc))
+        try:
+            found = discover.scan(self.port,
+                                  timeout=float(self.limits.get("discover_scan_timeout") or 0.25))
+        except OSError:
+            return None
+        for ip, rtt in found:
+            if ip == self.host:
+                continue
+            info = probe(ip, self.port, self.key,
+                         timeout=float(self.limits.get("discover_probe_timeout") or 2.0))
+            if info is None:
+                continue
+            old = self.host
+            self.host = ip
+            self._persist_host(ip)
+            self.log("host moved %s -> %s (%.1f ms, %s)" % (old, ip, rtt, info.get("host")))
+            return ip
+        return None
+
+    def _persist_host(self, ip):
+        """Write the new address back so the next process starts warm."""
+        try:
+            cfg = cfgmod.load()
+        except RuntimeError:
+            return
+        entry = (cfg.get("hosts") or {}).get(self.alias)
+        if not entry:
+            return
+        entry["host"] = ip
+        try:
+            cfgmod.save(cfg)
+        except OSError:
+            pass
+
+    def _handshake(self):
+        session = _handshake_on(self.sock, self.key)
+        self.reader = session["reader"]
+        self.writer = session["writer"]
+        self.info = session["info"]
+        self.sealed = session["sealed"]
+        self.sealer_tx = session["sealer_tx"]
+        self.sealer_rx = session["sealer_rx"]
 
     def close(self):
         self._closed = True

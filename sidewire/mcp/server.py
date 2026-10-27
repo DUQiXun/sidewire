@@ -125,7 +125,7 @@ class StdioServer(object):
         if method == "tools/call":
             name = params.get("name")
             args = params.get("arguments") or {}
-            if name not in toolmod.BY_NAME:
+            if name not in toolmod.BY_NAME and name != toolmod.CALL_TOOL["name"]:
                 self.error(rid, -32602, "unknown tool: %s" % name)
                 return
             self.reply(rid, toolmod.dispatch(self.ctx, name, args))

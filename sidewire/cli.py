@@ -14,8 +14,10 @@ import time
 
 from . import __version__
 from . import config as cfgmod
+from . import discover
 from . import protocol as P
 from .client import RemoteError, open_remote
+from .client import probe as client_probe
 from .mcp import tools as toolmod
 
 
@@ -125,6 +127,62 @@ def cmd_list(args):
                                               entry.get("port", 7900),
                                               status, entry.get("note", "")))
     print(dim("\n* = default"))
+    return 0
+
+
+def cmd_discover(args):
+    cfg = cfgmod.load()
+    alias = None
+    key_text = None
+    try:
+        alias, entry = cfgmod.resolve_host(cfg, args.alias)
+        key_text = cfgmod.host_key(entry, cfg)
+    except Exception:  # noqa: BLE001
+        pass
+    if args.key:
+        key_text = args.key
+    if not key_text:
+        print(bad("no key to verify with") + dim(" — register a host first, or pass --key"))
+        return 1
+    key = P.parse_key(key_text)
+    port = int(args.port or cfgmod.DEFAULT_PORT)
+
+    nets = discover.subnets()
+    if not nets:
+        print(bad("no usable local IPv4 address; nothing to sweep"))
+        return 1
+    print(dim("sweeping %s on port %d" % (", ".join(str(n) for n in nets), port)))
+    hits = discover.scan(port, timeout=args.timeout)
+    if not hits:
+        print(bad("nothing answering on port %d" % port))
+        return 1
+
+    print("\n%-16s %-9s %-20s %-8s %s" % ("ADDRESS", "RTT", "HOSTNAME", "OS", "KEY"))
+    verified = []
+    for ip, rtt in hits:
+        info = client_probe(ip, port, key)
+        if info:
+            verified.append(ip)
+            print("%-16s %-9s %-20s %-8s %s" % (ip, "%.0fms" % rtt,
+                                                info.get("host", "?"),
+                                                info.get("os", "?"), ok("match")))
+        else:
+            print("%-16s %-9s %-20s %-8s %s" % (ip, "%.0fms" % rtt, "-", "-",
+                                                dim("wrong key or not sidewire")))
+
+    if args.fix and verified:
+        target = args.alias or cfg.get("default")
+        hosts = cfg.get("hosts") or {}
+        if target in hosts:
+            if len(verified) > 1 and not args.force:
+                print(bad("\n%d candidates matched; pick one with --address" % len(verified)))
+                return 1
+            chosen = args.address if args.address in verified else verified[0]
+            hosts[target]["host"] = chosen
+            cfgmod.save(cfg)
+            print("\n" + ok("updated") + " %s -> %s" % (target, chosen))
+        else:
+            print(dim("\nno host %r to update; use `sidewire add`" % target))
     return 0
 
 
@@ -518,6 +576,17 @@ def build_parser():
     p.add_argument("--no-check", action="store_true")
     p.add_argument("-v", "--verbose", action="store_true")
     p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("discover", help="find agents on the local network")
+    p.add_argument("alias", nargs="?", default=None)
+    p.add_argument("--port", type=int, default=None)
+    p.add_argument("--timeout", type=float, default=0.25,
+                   help="per-address TCP timeout in seconds (default 0.25)")
+    p.add_argument("--key", default=None, help="verify with this key instead of the stored one")
+    p.add_argument("--fix", action="store_true", help="write the match into hosts.json")
+    p.add_argument("--address", default=None, help="which match to adopt when several answer")
+    p.add_argument("--force", action="store_true", help="adopt the fastest match without asking")
+    p.set_defaults(func=cmd_discover)
 
     p = sub.add_parser("ping", help="round-trip test")
     p.add_argument("alias", nargs="?")

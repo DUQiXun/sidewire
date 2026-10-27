@@ -517,6 +517,70 @@ TOOLS = [
 
 BY_NAME = {t["name"]: t for t in TOOLS}
 
+# ---------------------------------------------------------------- slim mode
+#
+# Thirty tool definitions cost about 20 KB of schema in every conversation,
+# which is real money when the agent starts a fresh one for a small job. In
+# slim mode the server advertises the handful that cover most work plus one
+# dispatcher for the rest. SIDEWIRE_TOOLS=full turns it back off.
+
+SLIM_TOOLS = (
+    "hosts",      # which machine
+    "host_info",  # what it is
+    "run",        # the workhorse
+    "fs_ls",
+    "fs_read",
+    "fs_write",
+    "fs_edit",
+    "fs_pull",
+    "fs_push",
+)
+
+CALL_TOOL = {
+    "name": "call",
+    "description":
+        "Run any other sidewire tool by name. With no name it returns the full catalogue "
+        "(names, one-line summaries, schemas). Use it for jobs, tty, proc, svc, net, pkg, "
+        "power, run_script, fs_find, fs_grep, fs_stat, fs_tail, fs_hash, fs_manage, host_probe.",
+    "inputSchema": _schema({
+        "name": {"type": "string", "description": "Tool name, e.g. \"proc_list\". Omit to list."},
+        "arguments": {"type": "object", "description": "Arguments for that tool."},
+    }),
+    "handler": "t_call",
+}
+
+
+def slim_enabled():
+    mode = (os.environ.get("SIDEWIRE_TOOLS") or "").strip().lower()
+    return mode in ("slim", "lean", "min")
+
+
+def _summary(text):
+    """First sentence of a description, for the catalogue listing."""
+    for sep in (". ", ".\n"):
+        if sep in text:
+            return text.split(sep, 1)[0] + "."
+    return text
+
+
+def t_call(ctx, args):
+    name = (args.get("name") or "").strip()
+    if not name:
+        return {"tools": [{"name": t["name"], "summary": _summary(t["description"])}
+                          for t in TOOLS]}
+    if name in ("call",):
+        raise ValueError("call cannot call itself")
+    tool = BY_NAME.get(name)
+    if not tool:
+        raise KeyError("unknown tool %r; call with no name to list them" % name)
+    inner = args.get("arguments")
+    if inner is None:
+        inner = {}
+    if not isinstance(inner, dict):
+        raise ValueError("arguments must be an object")
+    return globals()[tool["handler"]](ctx, inner)
+
+
 
 # ------------------------------------------------------------------- handlers
 
@@ -705,7 +769,7 @@ def t_power(ctx, args):
 
 
 def dispatch(ctx, name, args):
-    tool = BY_NAME.get(name)
+    tool = CALL_TOOL if name == CALL_TOOL["name"] else BY_NAME.get(name)
     if not tool:
         raise KeyError(name)
     handler = globals()[tool["handler"]]
@@ -716,5 +780,11 @@ def dispatch(ctx, name, args):
 
 
 def tool_list_payload():
-    return [{"name": t["name"], "description": t["description"],
-             "inputSchema": t["inputSchema"]} for t in TOOLS]
+    if not slim_enabled():
+        return [{"name": t["name"], "description": t["description"],
+                 "inputSchema": t["inputSchema"]} for t in TOOLS]
+    out = [{"name": t["name"], "description": t["description"], "inputSchema": t["inputSchema"]}
+           for t in TOOLS if t["name"] in SLIM_TOOLS]
+    out.append({"name": CALL_TOOL["name"], "description": CALL_TOOL["description"],
+                "inputSchema": CALL_TOOL["inputSchema"]})
+    return out
